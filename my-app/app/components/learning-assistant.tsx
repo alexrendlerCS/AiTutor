@@ -117,6 +117,7 @@ export function LearningAssistant() {
       <div className={`flex flex-col flex-1 p-4 md:p-6 overflow-hidden ${focusMode ? "bg-blue-50" : ""}`}>
         <div className="flex justify-between items-center mb-4">
           <h1 className="text-2xl md:text-3xl font-bold text-purple-700">Learning Buddy</h1>
+          
 
           {/* Focus mode timer */}
           {focusMode && (
@@ -139,16 +140,59 @@ export function LearningAssistant() {
             <ProgressTracker xpPoints={xpPoints} />
 
             {/* Idle prompt appears when user is inactive */}
-            {isIdle && (
-              <IdlePrompt
-                subject={activeSubject}
-                onPromptClick={() => {
-                  handleActivity()
-                  // In a real app, this would trigger a specific AI response
-                }}
-              />
-            )}
-
+            <IdlePrompt
+  subject={activeSubject}
+  xpPoints={xpPoints}
+  onEarnXp={(xp) => setXpPoints((prev) => prev + xp)}
+  onPromptClick={async (promptText) => {
+    const typingId = "typing"
+    const userId = crypto.randomUUID()
+    const assistantId = crypto.randomUUID()
+  
+    // 1. Show user message and assistant typing
+    window.dispatchEvent(
+      new CustomEvent("ai-message", {
+        detail: [
+          {
+            id: userId,
+            content: promptText,
+            sender: "user",
+          },
+          {
+            id: typingId,
+            content: "",
+            sender: "assistant",
+            isTyping: true,
+          },
+        ],
+      })
+    )
+  
+    // 2. Fetch response
+    const response = await fetch("/api/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: promptText, subject: activeSubject }),
+    })
+  
+    const { reply } = await response.json()
+  
+    // 3. Remove typing and show assistant reply (do NOT resend user message)
+    window.dispatchEvent(
+      new CustomEvent("ai-message", {
+        detail: [
+          {
+            id: assistantId,
+            content: reply,
+            sender: "assistant",
+          },
+        ],
+      })
+    )
+  }}
+  
+  
+/>
             <ChatInterface subject={activeSubject} onSendMessage={handleSendMessage} />
 
             {/* Emotional check-in */}

@@ -5,13 +5,15 @@ import { Send, Mic } from "lucide-react"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
 import type { Subject } from "./learning-assistant"
+type OpenAIMessage = { role: "user" | "assistant"; content: string };
 import { cn } from "../lib/utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip"
+import { formatAIResponse } from "../utils/formatAIResponse"
 
 interface Message {
   id: string
   content: string
-  sender: "user" | "assistant"
+  sender: "user" | "assistant" | "system"
   isTyping?: boolean
 }
 
@@ -32,7 +34,6 @@ export function ChatInterface({ subject, onSendMessage }: ChatInterfaceProps) {
   const [isListening, setIsListening] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  // Update welcome message when subject changes
   useEffect(() => {
     setMessages((prev) => [
       {
@@ -40,19 +41,93 @@ export function ChatInterface({ subject, onSendMessage }: ChatInterfaceProps) {
         content: getWelcomeMessage(subject),
         sender: "assistant",
       },
-      ...prev.filter((msg) => msg.id !== "welcome" && !msg.id.startsWith("welcome-")),
+      ...prev.filter((msg) => !msg.id.startsWith("welcome")),
     ])
   }, [subject])
 
-  // Auto-scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
+  useEffect(() => {
+    const handleExternalSend = (e: Event) => {
+      const customEvent = e as CustomEvent<string | [Message, Message]>
+      const detail = customEvent.detail
+      console.log("🔥 Message received:", detail)
+      if (Array.isArray(detail)) {
+        const typingId = "typing"
+      
+        const newMessages = detail
+          .filter((msg): msg is Message => !!msg) // remove null/undefined
+          .map((msg) => ({ ...msg, id: msg.id ?? crypto.randomUUID() }))
+      
+        setMessages((prev) =>
+          prev
+            .filter((msg) => msg.id !== typingId)
+            .concat(newMessages)
+        )
+      }          
+      
+       else {
+        const externalMessage = detail
+  
+        const userId = crypto.randomUUID()
+        const typingId = "typing"
+  
+        const userMessage: Message = {
+          id: userId,
+          content: externalMessage,
+          sender: "user",
+        }
+  
+        setMessages((prev) => [
+          ...prev,
+          userMessage,
+          { id: typingId, content: "", sender: "assistant", isTyping: true },
+        ])
+  
+        fetch("/api/ai", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subject, message: externalMessage }),
+        })
+          .then((res) => res.json())
+          .then((data) => {
+            const assistantMessage: Message = {
+              id: crypto.randomUUID(),
+              content: data.reply,
+              sender: "assistant",
+            }
+  
+            setMessages((prev) =>
+              prev.filter((msg) => msg.id !== typingId).concat(assistantMessage)
+            )
+          })
+          .catch(() => {
+            const errorMessage: Message = {
+              id: crypto.randomUUID(),
+              content: "Hmm... I'm having trouble responding right now. Try again in a moment!",
+              sender: "assistant",
+            }
+  
+            setMessages((prev) =>
+              prev.filter((msg) => msg.id !== typingId).concat(errorMessage)
+            )
+          })
+      }
+    }
+  
+    window.addEventListener("ai-message", handleExternalSend)
+    console.log("✅ Listening for ai-message event...")
+  
+    return () => {
+      window.removeEventListener("ai-message", handleExternalSend)
+    }
+  }, [messages, subject])
+  
   const handleSend = () => {
     if (!inputValue.trim()) return
 
-    // Add user message
     const userMessage: Message = {
       id: Date.now().toString(),
       content: inputValue,
@@ -63,58 +138,56 @@ export function ChatInterface({ subject, onSendMessage }: ChatInterfaceProps) {
     onSendMessage(inputValue)
     setInputValue("")
 
-    // Add typing indicator
-    const typingId = (Date.now() + 1).toString()
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: typingId,
-        content: "",
-        sender: "assistant",
-        isTyping: true,
-      },
-    ])
+    const typingId = "typing"
 
-    // Simulate AI response with typing effect
-    // Fetch response from your backend
-fetch("/api/ai", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ message: inputValue, subject }),
-})
-  .then((res) => res.json())
-  .then((data) => {
-    // Remove typing indicator and show actual assistant response
     setMessages((prev) =>
       prev
         .filter((msg) => msg.id !== typingId)
-        .concat({
-          id: (Date.now() + 2).toString(),
-          content: data.reply,
-          sender: "assistant",
-        }),
-    );
-  })
-  .catch(() => {
-    setMessages((prev) =>
-      prev
-        .filter((msg) => msg.id !== typingId)
-        .concat({
-          id: (Date.now() + 2).toString(),
-          content: "Hmm... I'm having trouble responding right now. Try again in a moment!",
-          sender: "assistant",
-        }),
-    );
-  });
+        .concat({ id: typingId, content: "", sender: "assistant", isTyping: true })
+    )
+    
 
+    const historyForAPI: OpenAIMessage[] = messages
+      .filter((msg) => msg.sender === "user" || msg.sender === "assistant")
+      .map((msg) => ({
+        role: msg.sender as "user" | "assistant",
+        content: msg.content,
+      }))
+      .concat({
+        role: "user",
+        content: inputValue,
+      })
+
+    fetch("/api/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subject, messages: historyForAPI }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        setMessages((prev) =>
+          prev.filter((msg) => msg.id !== typingId).concat({
+            id: crypto.randomUUID(),
+            content: data.reply,
+            sender: "assistant",
+          })
+        )
+      })
+      .catch(() => {
+        setMessages((prev) =>
+          prev.filter((msg) => msg.id !== typingId).concat({
+            id: (Date.now() + 2).toString(),
+            content: "Hmm... I'm having trouble responding right now. Try again in a moment!",
+            sender: "assistant",
+          })
+        )
+      })
   }
 
   const handleVoiceInput = () => {
-    // In a real app, this would use the Web Speech API
     setIsListening(!isListening)
 
     if (!isListening) {
-      // Simulate voice recognition after 2 seconds
       setTimeout(() => {
         const fakeVoiceInput = getRandomVoiceInput(subject)
         setInputValue(fakeVoiceInput)
@@ -131,34 +204,44 @@ fetch("/api/ai", {
 
       <div className="flex-1 overflow-y-auto p-4">
         <div className="space-y-4">
-          {messages.map((message) => (
+        {messages.map((message) =>
+  message && (
+    <div
+      key={message.id}
+      className={cn(
+        "max-w-[80%] rounded-2xl p-3 animate-fadeIn",
+        message.sender === "user"
+          ? "bg-purple-100 ml-auto rounded-tr-none"
+          : "bg-blue-50 rounded-tl-none"
+      )}
+    >
+      {message.isTyping ? (
+        <div className="flex space-x-1 items-center h-6">
+          {[0, 150, 300].map((delay) => (
             <div
-              key={message.id}
-              className={cn(
-                "max-w-[80%] rounded-2xl p-3 animate-fadeIn",
-                message.sender === "user" ? "bg-purple-100 ml-auto rounded-tr-none" : "bg-blue-50 rounded-tl-none",
-              )}
-            >
-              {message.isTyping ? (
-                <div className="flex space-x-1 items-center h-6">
-                  <div
-                    className="w-2 h-2 rounded-full bg-blue-400 animate-bounce"
-                    style={{ animationDelay: "0ms" }}
-                  ></div>
-                  <div
-                    className="w-2 h-2 rounded-full bg-blue-400 animate-bounce"
-                    style={{ animationDelay: "150ms" }}
-                  ></div>
-                  <div
-                    className="w-2 h-2 rounded-full bg-blue-400 animate-bounce"
-                    style={{ animationDelay: "300ms" }}
-                  ></div>
-                </div>
-              ) : (
-                <p className="text-gray-800">{message.content}</p>
-              )}
-            </div>
+              key={delay}
+              className="w-2 h-2 rounded-full bg-blue-400 animate-bounce"
+              style={{ animationDelay: `${delay}ms` }}
+            ></div>
           ))}
+        </div>
+      ) : (
+        <p className="text-gray-800">
+          {message.sender === "assistant" ? (
+            <span
+              dangerouslySetInnerHTML={{
+                __html: formatAIResponse(message.content).replace(/\n/g, "<br>"),
+              }}
+            />
+          ) : (
+            message.content
+          )}
+        </p>
+      )}
+    </div>
+  )
+)}
+
           <div ref={messagesEndRef} />
         </div>
       </div>
@@ -178,7 +261,9 @@ fetch("/api/ai", {
                 <TooltipTrigger asChild>
                   <button
                     onClick={handleVoiceInput}
-                    className={`absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-purple-600 transition-colors ${isListening ? "text-red-500 animate-pulse" : ""}`}
+                    className={`absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-purple-600 transition-colors ${
+                      isListening ? "text-red-500 animate-pulse" : ""
+                    }`}
                   >
                     <Mic className="h-5 w-5" />
                   </button>
@@ -201,56 +286,21 @@ fetch("/api/ai", {
 function getWelcomeMessage(subject: Subject): string {
   switch (subject) {
     case "math":
-      return "Hi there! I'm your Math buddy. What would you like to learn today? We can work on numbers, shapes, or even fun math puzzles!"
+      return "Hi there! I'm your Math buddy. What would you like to learn today?"
     case "reading":
-      return "Hello! Ready to explore amazing stories together? I can help you read, understand new words, or talk about your favorite books!"
+      return "Hello! Ready to explore amazing stories together?"
     case "spelling":
-      return "Welcome to Spelling! I can help you practice tricky words, learn spelling rules, or play word games. What would you like to do?"
+      return "Welcome to Spelling! Let's practice some fun and tricky words."
     case "exploration":
-      return "Time to explore! We can learn about animals, space, history, or anything else you're curious about. What would you like to discover?"
+      return "Time to explore! What would you like to discover today?"
   }
 }
 
-function getAIResponse(subject: Subject, userMessage: string): string {
-  // In a real app, this would call your AI service
-  // This is just a simple demo response
-  const responses = {
-    math: [
-      "That's a great math question! Let's figure it out together.",
-      "I like how you're thinking about these numbers. Here's how we can solve it...",
-      "Math can be fun! Let's break this down into simple steps.",
-    ],
-    reading: [
-      "That's a wonderful observation about the story!",
-      "I like how you're thinking about the characters. Have you noticed how they...",
-      "Great question about that word! Let me explain what it means...",
-    ],
-    spelling: [
-      "Good try! That word is tricky. Let's practice it together.",
-      "You're getting better at spelling! Here's a tip to remember this one...",
-      "Let's break this word into syllables to make it easier to spell.",
-    ],
-    exploration: [
-      "What an interesting question! Let's explore that together.",
-      "Did you know? Here's a cool fact about that...",
-      "That's something scientists are still learning about! Here's what we know so far...",
-    ],
-  }
-
-  const subjectResponses = responses[subject]
-  return subjectResponses[Math.floor(Math.random() * subjectResponses.length)]
-}
-
-// Add this helper function for simulating voice input
 function getRandomVoiceInput(subject: Subject): string {
   const inputs = {
     math: ["Can you help me with fractions?", "What's 7 times 8?", "How do I solve word problems?"],
     reading: ["What does 'perseverance' mean?", "Can you recommend a good book?", "How do I find the main idea?"],
-    spelling: [
-      "How do you spell 'necessary'?",
-      "What's the rule for 'i before e'?",
-      "Can you help me spell 'beautiful'?",
-    ],
+    spelling: ["How do you spell 'necessary'?", "What's the rule for 'i before e'?", "Spell 'beautiful' for me?"],
     exploration: ["Why is the sky blue?", "How do planes fly?", "Tell me about dinosaurs"],
   }
 
