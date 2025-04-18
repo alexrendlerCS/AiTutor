@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { cn } from "../lib/utils"
-import type { Emotion } from "./learning-assistant"
+import type { Emotion } from "../learning-assistant/learning-assistant"
 
 interface EmotionalCheckInProps {
   onEmotionSelected: (emotion: Emotion) => void

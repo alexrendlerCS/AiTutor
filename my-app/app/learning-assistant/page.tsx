@@ -1,19 +1,25 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { Sidebar } from "./sidebar"
-import { ChatInterface } from "./chat-interface"
-import { ProgressTracker } from "./progress-tracker"
-import { ParentDashboardButton } from "./parent-dashboard-button"
-import { BreakButton } from "./break-button"
-import { FocusModeButton } from "./focus-mode-button"
-import { IdlePrompt } from "./idle-prompt"
-import { EmotionalCheckIn } from "./emotional-check-in"
+import { Sidebar } from "../components/sidebar"
+import { ChatInterface } from "../components/chat-interface"
+import { ProgressTracker } from "../components/progress-tracker"
+import { ParentDashboardButton } from "../components/parent-dashboard-button"
+import { BreakButton } from "../components/break-button"
+import { FocusModeButton } from "../components/focus-mode-button"
+import { IdlePrompt } from "../components/idle-prompt"
+import { EmotionalCheckIn } from "../components/emotional-check-in"
+import { getUserFromToken } from "../lib/auth"
 
 export type Subject = "math" | "reading" | "spelling" | "exploration"
 export type Emotion = "happy" | "neutral" | "sad" | null
+const getSubjectId = async (subjectName: string): Promise<number | null> => {
+  const res = await fetch(`/api/subjects?id_by_name=${subjectName}`)
+  const { id } = await res.json()
+  return id ?? null
+}
 
-export function LearningAssistant() {
+export default function LearningAssistant() {
   const [activeSubject, setActiveSubject] = useState<Subject>("math")
   const [xpPoints, setXpPoints] = useState(120)
   const [focusMode, setFocusMode] = useState(false)
@@ -25,20 +31,48 @@ export function LearningAssistant() {
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null)
   const focusTimerRef = useRef<NodeJS.Timeout | null>(null)
   const emotionalCheckTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const [userId, setUserId] = useState("")
+  const subjectMap: Record<Subject, number> = {
+    math: 1,
+    reading: 2,
+    spelling: 3,
+    exploration: 4,
+  }
+  
+  useEffect(() => {
+    fetch("/api/user")
+      .then((res) => res.json())
+      .then((data) => {
+        setUserId(data.userId)
+      })
+  }, [])
 
+  useEffect(() => {
+    const fetchUserProgress = async () => {
+      if (!userId) return
+      const subjectId = subjectMap[activeSubject]
+      if (!subjectId) return
+  
+      const progressRes = await fetch(
+        `/api/progress?user_id=${userId}&subject=${subjectId}`
+      )
+      const data = await progressRes.json()
+      setXpPoints(data?.xp || 0)
+    }
+  
+    fetchUserProgress()
+  }, [userId, activeSubject])
+  
   // Reset idle timer on activity
   const handleActivity = () => {
     setLastActivity(Date.now())
     setIsIdle(false)
   }
 
-  // This would be connected to your actual AI implementation
+  // Handles AI implementation
   const handleSendMessage = (message: string) => {
     console.log("Sending message:", message)
     handleActivity()
-    // In a real app, this would call your AI service
-    // For demo purposes, let's add some XP
-    setXpPoints((prev) => prev + 5)
   }
 
   useEffect(() => {
@@ -50,28 +84,26 @@ export function LearningAssistant() {
       }>
       const { subject, correct, attempts } = customEvent.detail
   
-      // XP logic
-      let xpEarned = 2 // base XP
+      let xpEarned = 2
       if (correct && attempts === 1) xpEarned = 10
       else if (correct && attempts <= 2) xpEarned = 7
       else if (correct) xpEarned = 5
       else xpEarned = 1
   
-      // Update XP
-      setXpPoints((prev) => prev + xpEarned)
+      setXpPoints((prev) => {
+        const newXp = prev + xpEarned
+        updateXpInDatabase(newXp)
+        return newXp
+      })
   
-      // Optional: log or store in DB
       console.log(`Answer attempt:`, { subject, correct, attempts, xpEarned })
-  
-      // TODO: Supabase call to log performance (in the next step)
     }
   
     window.addEventListener("answer-attempt", handleAnswerAttempt)
+    return () => window.removeEventListener("answer-attempt", handleAnswerAttempt)
+  }, [activeSubject])
   
-    return () => {
-      window.removeEventListener("answer-attempt", handleAnswerAttempt)
-    }
-  }, [])
+  
   
   // Handle focus mode timer
   useEffect(() => {
@@ -134,6 +166,23 @@ export function LearningAssistant() {
     }
   }, [])
 
+  const updateXpInDatabase = async (newXp: number) => {
+    if (!userId) return
+    const subjectId = subjectMap[activeSubject]
+    if (!subjectId) return
+  
+    await fetch("/api/progress/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: userId,
+        subject: subjectId,
+        xp: newXp,
+      }),
+    })
+  }
+  
+  
   const handleEmotionSelected = (selectedEmotion: Emotion) => {
     setEmotion(selectedEmotion)
     setShowEmotionalCheckIn(false)
@@ -171,60 +220,60 @@ export function LearningAssistant() {
           <div className="flex-1 flex flex-col">
             <ProgressTracker xpPoints={xpPoints} />
 
-            {/* Idle prompt appears when user is inactive */}
+            {/* Challenge Questions */}
             <IdlePrompt
-  subject={activeSubject}
-  xpPoints={xpPoints}
-  onEarnXp={(xp) => setXpPoints((prev) => prev + xp)}
-  onPromptClick={async (promptText) => {
-    const typingId = "typing"
-    const userId = crypto.randomUUID()
-    const assistantId = crypto.randomUUID()
-  
-    // 1. Show user message and assistant typing
-    window.dispatchEvent(
-      new CustomEvent("ai-message", {
-        detail: [
-          {
-            id: userId,
-            content: promptText,
-            sender: "user",
-          },
-          {
-            id: typingId,
-            content: "",
-            sender: "assistant",
-            isTyping: true,
-          },
-        ],
-      })
-    )
-  
-    // 2. Fetch response
-    const response = await fetch("/api/ai", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: promptText, subject: activeSubject }),
-    })
-  
-    const { reply } = await response.json()
-  
-    // 3. Remove typing and show assistant reply (do NOT resend user message)
-    window.dispatchEvent(
-      new CustomEvent("ai-message", {
-        detail: [
-          {
-            id: assistantId,
-            content: reply,
-            sender: "assistant",
-          },
-        ],
-      })
-    )
-  }}
-  
-  
-/>
+              subject={activeSubject}
+              xpPoints={xpPoints}
+              userId={userId}
+              onEarnXp={(xp) => setXpPoints((prev) => prev + xp)}
+              onPromptClick={async (promptText) => {
+                const typingId = "typing"
+                const userId = crypto.randomUUID()
+                const assistantId = crypto.randomUUID()
+
+                // 1. Show user message and assistant typing
+                window.dispatchEvent(
+                  new CustomEvent("ai-message", {
+                    detail: [
+                      {
+                        id: userId,
+                        content: promptText,
+                        sender: "user",
+                      },
+                      {
+                        id: typingId,
+                        content: "",
+                        sender: "assistant",
+                        isTyping: true,
+                      },
+                    ],
+                  })
+                )
+
+                // 2. Fetch response
+                const response = await fetch("/api/ai", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ message: promptText, subject: activeSubject }),
+                })
+
+                const { reply } = await response.json()
+
+                // 3. Remove typing and show assistant reply
+                window.dispatchEvent(
+                  new CustomEvent("ai-message", {
+                    detail: [
+                      {
+                        id: assistantId,
+                        content: reply,
+                        sender: "assistant",
+                      },
+                    ],
+                  })
+                )
+              }}
+            />
+
             <ChatInterface subject={activeSubject} onSendMessage={handleSendMessage} />
 
             {/* Emotional check-in */}

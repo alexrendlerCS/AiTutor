@@ -35,13 +35,12 @@ export default function LoginSignupPage() {
   
     const endpoint = isLogin ? "/api/auth/login" : "/api/auth/signup"
   
-    // Build payload dynamically depending on login/signup
     const payload = isLogin
       ? {
-          login: form.email, // this could be email or username
+          login: form.email,
           password: form.password,
         }
-      : form // full form for signup
+      : form
   
     const res = await fetch(endpoint, {
       method: "POST",
@@ -53,11 +52,18 @@ export default function LoginSignupPage() {
     if (!res.ok) {
       setError(data.error || "Oops! Something went wrong. Try again! 😓")
     } else {
-      setSuccess(isLogin ? "Welcome back, superstar! 🌟" : "You're all signed up! Click Login to go learn! 🚀")
+      setSuccess(
+        isLogin
+          ? "Welcome back, superstar! 🌟"
+          : "You're all signed up! Redirecting... 🚀"
+      )
       document.cookie = `token=${data.token}; path=/`
-      setTimeout(() => router.refresh(), 1200)
+  
+      router.push("/learning-assistant") 
+
     }
   }
+  
   
   return (
     <div className="max-w-md mx-auto mt-20 bg-white rounded-xl shadow-md p-6">

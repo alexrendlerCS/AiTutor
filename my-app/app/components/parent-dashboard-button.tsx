@@ -1,35 +1,47 @@
 "use client"
 
-import type React from "react"
-
-import { useState } from "react"
-import { User } from "lucide-react"
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
+import { User, LogOut } from "lucide-react"
 import { Button } from "../components/ui/button"
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogDescription,
   DialogFooter,
 } from "../components/ui/dialog"
 import { Input } from "../components/ui/input"
 import { Label } from "../components/ui/label"
+import { getUserFromToken } from "../lib/auth"
 
 export function ParentDashboardButton() {
   const [open, setOpen] = useState(false)
   const [password, setPassword] = useState("")
   const [error, setError] = useState(false)
+  const [user, setUser] = useState<{ username: string; full_name?: string; email?: string } | null>(null)
+  const router = useRouter()
+
+  useEffect(() => {
+    const parsed = getUserFromToken()
+    setUser(parsed)
+  }, [])
+
+  const handleLogout = () => {
+    document.cookie = "token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/"
+    router.push("/")
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    // Simple demo password check - in a real app, use proper authentication
-    if (password === "parent123") {
-      // Would redirect to parent dashboard in a real app
-      window.alert("Parent dashboard access granted!")
-      setOpen(false)
+    const correctPassword = "admin123" // 🔐 Replace with env var or secure logic
+
+    if (password === correctPassword) {
       setError(false)
+      setOpen(false)
+      router.push("/parent-dashboard") // Change route if needed
     } else {
       setError(true)
     }
@@ -42,16 +54,25 @@ export function ParentDashboardButton() {
           <User className="h-4 w-4" />
         </Button>
       </DialogTrigger>
+
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Parent/Teacher Access</DialogTitle>
-          <DialogDescription>Enter your password to access the dashboard.</DialogDescription>
+          <DialogDescription>
+            View account info or enter password to access the dashboard.
+          </DialogDescription>
         </DialogHeader>
 
+        <div className="space-y-3 text-sm text-gray-700 pb-4">
+          <p><strong>Username:</strong> {user?.username}</p>
+          <p><strong>Name:</strong> {user?.full_name || "N/A"}</p>
+          <p><strong>Email:</strong> {user?.email || "N/A"}</p>
+        </div>
+
         <form onSubmit={handleSubmit}>
-          <div className="space-y-4 py-4">
+          <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">Dashboard Password</Label>
               <Input
                 id="password"
                 type="password"
@@ -66,8 +87,12 @@ export function ParentDashboardButton() {
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="mt-4 flex justify-between items-center">
             <Button type="submit">Access Dashboard</Button>
+            <Button variant="outline" onClick={handleLogout}>
+              <LogOut className="h-4 w-4 mr-2" />
+              Sign Out
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

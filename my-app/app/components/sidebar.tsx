@@ -4,7 +4,7 @@ import type React from "react"
 
 import { Book, Brain, Calculator, Sparkles } from "lucide-react"
 import { cn } from "../lib/utils"
-import type { Subject } from "./learning-assistant"
+import type { Subject } from "../learning-assistant/page.tsx"
 import { useIsMobile } from "../hooks/use-mobile"
 import { useState } from "react"
 import { Button } from "../components/ui/button"

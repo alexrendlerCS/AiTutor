@@ -1,19 +1,27 @@
 // AITutor/my-app/lib/auth.ts
-import { cookies } from "next/headers"
 import jwt from "jsonwebtoken"
 
 const JWT_SECRET = process.env.JWT_SECRET || "super-secret-key"
 
-export async function getUserFromToken() {
-  const cookieStore = await cookies()
-  const token = cookieStore.get("token")?.value
-
-  if (!token) return null
-
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET)
-    return decoded as { userId: string; username?: string; email?: string }
-  } catch {
-    return null
+// ✅ Client-side version
+export function getUserFromToken() {
+    if (typeof document === "undefined") return null
+  
+    const token = document.cookie
+      .split("; ")
+      .find((row) => row.startsWith("token="))
+      ?.split("=")[1]
+  
+    if (!token) return null
+  
+    try {
+      const decoded = jwt.decode(token) as { userId: string; username: string; email?: string; full_name?: string }
+  
+      if (!decoded || !decoded.username) return null 
+  
+      return decoded
+    } catch {
+      return null
+    }
   }
-}
+  

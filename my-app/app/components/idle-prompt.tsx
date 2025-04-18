@@ -2,11 +2,13 @@
 
 import { useState, useEffect, useRef } from "react"
 import { ChevronDown, Lightbulb } from "lucide-react"
-import type { Subject } from "./learning-assistant"
+import type { Subject } from "../learning-assistant/page"
+import { logChallengeAttempt } from "../lib/logChallengeAttempt"
 
 interface ChallengeBoxProps {
   subject: Subject
   xpPoints: number
+  userId: string
   onEarnXp: (xp: number) => void
   onPromptClick: (prompt: string) => void
 }
@@ -20,11 +22,16 @@ interface ChallengeQuestion {
   xpReward: number
 }
 
-export function IdlePrompt({ subject, xpPoints, onEarnXp, onPromptClick }: ChallengeBoxProps) {
+export function IdlePrompt({ subject, xpPoints, userId, onEarnXp, onPromptClick }: ChallengeBoxProps) {
   const [questions, setQuestions] = useState<ChallengeQuestion[]>([])
-  const [currentXP, setCurrentXP] = useState(0)
+  const [currentXP, setCurrentXP] = useState(xpPoints)
   const [isOpen, setIsOpen] = useState(false)
   const detailsRef = useRef<HTMLDetailsElement>(null)
+
+  // Keep XP in sync with outside state (prop)
+  useEffect(() => {
+    setCurrentXP(xpPoints)
+  }, [xpPoints])
 
   useEffect(() => {
     const raw = getPromptsForSubject(subject)
@@ -39,15 +46,58 @@ export function IdlePrompt({ subject, xpPoints, onEarnXp, onPromptClick }: Chall
     setQuestions(generated)
   }, [subject])
 
-  const handleClick = (question: ChallengeQuestion) => {
+  const updateXpInDatabase = async (newXp: number) => {
+    const subjectMap: Record<Subject, number> = {
+      math: 1,
+      reading: 2,
+      spelling: 3,
+      exploration: 4,
+    }
+
+    const subjectId = subjectMap[subject]
+    if (!userId || !subjectId) return
+
+    await fetch("/api/progress/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: userId,
+        subject: subjectId,
+        xp: newXp,
+      }),
+    })
+  }
+
+  const handleClick = async (question: ChallengeQuestion) => {
     if (question.completed || currentXP < question.xpRequired) return
 
+    // Trigger assistant AI prompt
     onPromptClick(question.aiPrompt)
+
+    // Update state and backend
+    const newXp = currentXP + question.xpReward
     onEarnXp(question.xpReward)
-    setCurrentXP((prev) => prev + question.xpReward)
+    setCurrentXP(newXp)
+    updateXpInDatabase(newXp)
+
+    // Mark question as completed
     setQuestions((prev) =>
       prev.map((q) => (q.id === question.id ? { ...q, completed: true } : q))
     )
+
+    // Log the attempt
+    try {
+      await logChallengeAttempt({
+        user_id: userId,
+        subject,
+        correct: true,
+        attempts: 1,
+        used_hint: false,
+        xp_earned: question.xpReward,
+      })
+    } catch (err) {
+      console.error("❌ Failed to log challenge:", err)
+    }
   }
 
   return (
@@ -99,61 +149,25 @@ export function IdlePrompt({ subject, xpPoints, onEarnXp, onPromptClick }: Chall
 function getPromptsForSubject(subject: Subject): { text: string; aiPrompt: string }[] {
   const prompts = {
     math: [
-      {
-        text: "Solve a tricky multiplication problem!",
-        aiPrompt: "Give the student a challenging multiplication word problem using two-digit numbers, and encourage them to show their work."
-      },
-      {
-        text: "Try a logic puzzle with numbers!",
-        aiPrompt: "Present a math-based logic puzzle using basic addition, subtraction, and reasoning suitable for ages 9–12."
-      },
-      {
-        text: "What’s the next number in the pattern?",
-        aiPrompt: "Give a number pattern (e.g., 2, 4, 8, 16...) and ask the student to find the next number with a short explanation."
-      }
+      { text: "Solve a tricky multiplication problem!", aiPrompt: "Give the student a multiplication challenge involving two-digit numbers." },
+      { text: "Try a logic puzzle with numbers!", aiPrompt: "Present a number-based logic riddle suitable for 10-year-olds." },
+      { text: "What’s the next number in the pattern?", aiPrompt: "Create a number pattern and ask the student to find the next number." },
     ],
     reading: [
-      {
-        text: "Read a short story and summarize it!",
-        aiPrompt: "Share a short paragraph-level story and ask the student to summarize the main idea in 1–2 sentences."
-      },
-      {
-        text: "Guess the character from these clues!",
-        aiPrompt: "Describe a fictional character using three clues and ask the student to guess who it is."
-      },
-      {
-        text: "Find the main idea of a paragraph!",
-        aiPrompt: "Present a short paragraph and ask the student to identify the main idea in their own words."
-      }
+      { text: "Read a short story and summarize it!", aiPrompt: "Share a short 2-paragraph story and ask the student to summarize." },
+      { text: "Guess the character from these clues!", aiPrompt: "Describe a fictional character and ask the student to guess who it is." },
+      { text: "Find the main idea of a paragraph!", aiPrompt: "Present a paragraph and ask what the main idea is." },
     ],
     spelling: [
-      {
-        text: "Spell a really tricky word!",
-        aiPrompt: "Give the student a tricky spelling word appropriate for grade 4–6 and ask them to try spelling it out loud."
-      },
-      {
-        text: "Unscramble this word challenge!",
-        aiPrompt: "Give the student a scrambled word and ask them to unscramble it (e.g., 'tac' = 'cat'). Choose words that fit the subject's grade level."
-      },
-      {
-        text: "Guess the spelling rule used in a sentence!",
-        aiPrompt: "Present a sentence that highlights a spelling rule (like 'i before e except after c') and ask the student to explain the rule."
-      }
+      { text: "Spell a really tricky word!", aiPrompt: "Give a challenging spelling word appropriate for a 10-year-old and ask them to spell it." },
+      { text: "Unscramble this word challenge!", aiPrompt: "Give a scrambled word and ask the student to unscramble it." },
+      { text: "Guess the spelling rule used in a sentence!", aiPrompt: "Present a sentence and ask what spelling rule is used in it." },
     ],
     exploration: [
-      {
-        text: "Guess the planet based on facts!",
-        aiPrompt: "List 3 interesting facts about a planet and ask the student to guess which one it is."
-      },
-      {
-        text: "Solve a mystery about animals!",
-        aiPrompt: "Describe a mystery animal using clues about its behavior and habitat, and ask the student to guess the animal."
-      },
-      {
-        text: "What’s the science behind rainbows?",
-        aiPrompt: "Ask the student to explain how rainbows are formed, or provide a short explanation and quiz them on it."
-      }
-    ]
+      { text: "Guess the planet based on facts!", aiPrompt: "List 3 fun facts about a planet and ask the student to guess which planet it is." },
+      { text: "Solve a mystery about animals!", aiPrompt: "Describe clues about an animal and ask the student to figure it out." },
+      { text: "What’s the science behind rainbows?", aiPrompt: "Ask the student to explain how rainbows form in simple terms." },
+    ],
   }
 
   return prompts[subject]

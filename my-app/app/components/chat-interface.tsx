@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react"
 import { Send, Mic } from "lucide-react"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
-import type { Subject } from "./learning-assistant"
+import type { Subject } from "../learning-assistant/page.tsx"
 type OpenAIMessage = { role: "user" | "assistant"; content: string };
 import { cn } from "../lib/utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip"

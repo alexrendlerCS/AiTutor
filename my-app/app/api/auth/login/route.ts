@@ -43,10 +43,12 @@ export async function POST(req: NextRequest) {
       userId: data.id,
       username: data.username,
       email: data.email,
+      full_name: data.full_name, 
     },
     JWT_SECRET,
     { expiresIn: "7d" }
   )
+  
 
   return NextResponse.json({
     token,
