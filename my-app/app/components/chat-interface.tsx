@@ -33,6 +33,90 @@ export function ChatInterface({ subject, onSendMessage }: ChatInterfaceProps) {
   const [inputValue, setInputValue] = useState("")
   const [isListening, setIsListening] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [guessCount, setGuessCount] = useState(0)
+
+const isAnswerCorrect = (userMessage: string, assistantMessage: string) => {
+  // TODO: Replace with actual check logic
+  return assistantMessage.toLowerCase().includes("correct") || userMessage.toLowerCase() === "42"
+}
+
+const handleSend = () => {
+  if (!inputValue.trim()) return
+
+  const userMessage: Message = {
+    id: Date.now().toString(),
+    content: inputValue,
+    sender: "user",
+  }
+
+  setMessages((prev) => [...prev, userMessage])
+  setGuessCount((prev) => prev + 1) // 🔄 Count each guess
+
+  onSendMessage(inputValue)
+  setInputValue("")
+
+  const typingId = "typing"
+
+  setMessages((prev) =>
+    prev
+      .filter((msg) => msg.id !== typingId)
+      .concat({ id: typingId, content: "", sender: "assistant", isTyping: true })
+  )
+
+  const historyForAPI: OpenAIMessage[] = messages
+    .filter((msg) => msg.sender === "user" || msg.sender === "assistant")
+    .map((msg) => ({
+      role: msg.sender as "user" | "assistant",
+      content: msg.content,
+    }))
+    .concat({
+      role: "user",
+      content: inputValue,
+    })
+
+  fetch("/api/ai", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subject, messages: historyForAPI }),
+  })
+    .then((res) => res.json())
+    .then((data) => {
+      const assistantReply = data.reply
+
+      setMessages((prev) =>
+        prev.filter((msg) => msg.id !== typingId).concat({
+          id: crypto.randomUUID(),
+          content: assistantReply,
+          sender: "assistant",
+        })
+      )
+
+      const correct = isAnswerCorrect(inputValue, assistantReply)
+
+      // Fire event so parent (learning-assistant) can reward XP later
+      window.dispatchEvent(
+        new CustomEvent("answer-attempt", {
+          detail: {
+            subject,
+            correct,
+            attempts: guessCount + 1,
+          },
+        })
+      )
+
+      // Reset guess count if correct
+      if (correct) setGuessCount(0)
+    })
+    .catch(() => {
+      setMessages((prev) =>
+        prev.filter((msg) => msg.id !== typingId).concat({
+          id: crypto.randomUUID(),
+          content: "Hmm... I'm having trouble responding right now. Try again in a moment!",
+          sender: "assistant",
+        })
+      )
+    })
+}
 
   useEffect(() => {
     setMessages((prev) => [
@@ -124,65 +208,6 @@ export function ChatInterface({ subject, onSendMessage }: ChatInterfaceProps) {
       window.removeEventListener("ai-message", handleExternalSend)
     }
   }, [messages, subject])
-  
-  const handleSend = () => {
-    if (!inputValue.trim()) return
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      content: inputValue,
-      sender: "user",
-    }
-
-    setMessages((prev) => [...prev, userMessage])
-    onSendMessage(inputValue)
-    setInputValue("")
-
-    const typingId = "typing"
-
-    setMessages((prev) =>
-      prev
-        .filter((msg) => msg.id !== typingId)
-        .concat({ id: typingId, content: "", sender: "assistant", isTyping: true })
-    )
-    
-
-    const historyForAPI: OpenAIMessage[] = messages
-      .filter((msg) => msg.sender === "user" || msg.sender === "assistant")
-      .map((msg) => ({
-        role: msg.sender as "user" | "assistant",
-        content: msg.content,
-      }))
-      .concat({
-        role: "user",
-        content: inputValue,
-      })
-
-    fetch("/api/ai", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject, messages: historyForAPI }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        setMessages((prev) =>
-          prev.filter((msg) => msg.id !== typingId).concat({
-            id: crypto.randomUUID(),
-            content: data.reply,
-            sender: "assistant",
-          })
-        )
-      })
-      .catch(() => {
-        setMessages((prev) =>
-          prev.filter((msg) => msg.id !== typingId).concat({
-            id: (Date.now() + 2).toString(),
-            content: "Hmm... I'm having trouble responding right now. Try again in a moment!",
-            sender: "assistant",
-          })
-        )
-      })
-  }
 
   const handleVoiceInput = () => {
     setIsListening(!isListening)

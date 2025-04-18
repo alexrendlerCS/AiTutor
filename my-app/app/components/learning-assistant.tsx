@@ -41,6 +41,38 @@ export function LearningAssistant() {
     setXpPoints((prev) => prev + 5)
   }
 
+  useEffect(() => {
+    const handleAnswerAttempt = (e: Event) => {
+      const customEvent = e as CustomEvent<{
+        subject: Subject
+        correct: boolean
+        attempts: number
+      }>
+      const { subject, correct, attempts } = customEvent.detail
+  
+      // XP logic
+      let xpEarned = 2 // base XP
+      if (correct && attempts === 1) xpEarned = 10
+      else if (correct && attempts <= 2) xpEarned = 7
+      else if (correct) xpEarned = 5
+      else xpEarned = 1
+  
+      // Update XP
+      setXpPoints((prev) => prev + xpEarned)
+  
+      // Optional: log or store in DB
+      console.log(`Answer attempt:`, { subject, correct, attempts, xpEarned })
+  
+      // TODO: Supabase call to log performance (in the next step)
+    }
+  
+    window.addEventListener("answer-attempt", handleAnswerAttempt)
+  
+    return () => {
+      window.removeEventListener("answer-attempt", handleAnswerAttempt)
+    }
+  }, [])
+  
   // Handle focus mode timer
   useEffect(() => {
     if (focusMode && focusTimeRemaining > 0) {
