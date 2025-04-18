@@ -35,88 +35,85 @@ export function ChatInterface({ subject, onSendMessage }: ChatInterfaceProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [guessCount, setGuessCount] = useState(0)
 
-const isAnswerCorrect = (userMessage: string, assistantMessage: string) => {
-  // TODO: Replace with actual check logic
-  return assistantMessage.toLowerCase().includes("correct") || userMessage.toLowerCase() === "42"
-}
+  const isAnswerCorrect = (assistantMessage: string): boolean =>
+    /\b(that'?s\s+(it|right|correct)|you\s+got\s+it|exactly)\b/i.test(assistantMessage)
+  
 
-const handleSend = () => {
-  if (!inputValue.trim()) return
-
-  const userMessage: Message = {
-    id: Date.now().toString(),
-    content: inputValue,
-    sender: "user",
-  }
-
-  setMessages((prev) => [...prev, userMessage])
-  setGuessCount((prev) => prev + 1) // 🔄 Count each guess
-
-  onSendMessage(inputValue)
-  setInputValue("")
-
-  const typingId = "typing"
-
-  setMessages((prev) =>
-    prev
-      .filter((msg) => msg.id !== typingId)
-      .concat({ id: typingId, content: "", sender: "assistant", isTyping: true })
-  )
-
-  const historyForAPI: OpenAIMessage[] = messages
-    .filter((msg) => msg.sender === "user" || msg.sender === "assistant")
-    .map((msg) => ({
-      role: msg.sender as "user" | "assistant",
-      content: msg.content,
-    }))
-    .concat({
-      role: "user",
+  const handleSend = () => {
+    if (!inputValue.trim()) return
+  
+    // 1️⃣ create the new user message
+    const userMessage: Message = {
+      id: Date.now().toString(),
       content: inputValue,
+      sender: "user",
+    }
+  
+    // 2️⃣ build an updated list of messages that *includes* this new one
+    const beforeTyping = [...messages, userMessage]
+  
+    // 3️⃣ put that on screen
+    setMessages(beforeTyping)
+    setGuessCount(prev => prev + 1)
+    onSendMessage(inputValue)
+    setInputValue("")
+  
+    // 4️⃣ now insert the "assistant is typing" bubble
+    const typingId = "typing"
+    const withTyping = beforeTyping
+      .filter((m) => m.id !== typingId)
+      .concat({ id: typingId, content: "", sender: "assistant", isTyping: true })
+    setMessages(withTyping)
+  
+    // 5️⃣ build a history for the API from our **updated** list
+    const historyForAPI: OpenAIMessage[] = beforeTyping
+      .filter((m) => m.sender === "user" || m.sender === "assistant")
+      .map((m) => ({
+        role: m.sender as "user" | "assistant",
+        content: m.content,
+      }))
+      .concat({ role: "user", content: inputValue })
+  
+    // 6️⃣ fire off the request
+    fetch("/api/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subject, messages: historyForAPI }),
     })
-
-  fetch("/api/ai", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ subject, messages: historyForAPI }),
-  })
-    .then((res) => res.json())
-    .then((data) => {
-      const assistantReply = data.reply
-
-      setMessages((prev) =>
-        prev.filter((msg) => msg.id !== typingId).concat({
-          id: crypto.randomUUID(),
-          content: assistantReply,
-          sender: "assistant",
-        })
-      )
-
-      const correct = isAnswerCorrect(inputValue, assistantReply)
-
-      // Fire event so parent (learning-assistant) can reward XP later
-      window.dispatchEvent(
-        new CustomEvent("answer-attempt", {
-          detail: {
-            subject,
-            correct,
-            attempts: guessCount + 1,
-          },
-        })
-      )
-
-      // Reset guess count if correct
-      if (correct) setGuessCount(0)
-    })
-    .catch(() => {
-      setMessages((prev) =>
-        prev.filter((msg) => msg.id !== typingId).concat({
-          id: crypto.randomUUID(),
-          content: "Hmm... I'm having trouble responding right now. Try again in a moment!",
-          sender: "assistant",
-        })
-      )
-    })
-}
+      .then((res) => res.json())
+      .then((data) => {
+        const assistantReply = data.reply
+  
+        // replace the typing bubble with the real reply
+        setMessages((prev) =>
+          prev.filter((m) => m.id !== typingId).concat({
+            id: crypto.randomUUID(),
+            content: assistantReply,
+            sender: "assistant",
+          })
+        )
+  
+        const correct = isAnswerCorrect(assistantReply)
+  
+        window.dispatchEvent(
+          new CustomEvent("answer-attempt", {
+            detail: { subject, correct, attempts: guessCount + 1 },
+          })
+        )
+        if (correct) setGuessCount(0)
+      })
+      .catch(() => {
+        setMessages((prev) =>
+          prev.filter((m) => m.id !== typingId).concat({
+            id: crypto.randomUUID(),
+            content:
+              "Hmm... I'm having trouble responding right now. Try again in a moment!",
+            sender: "assistant",
+          })
+        )
+      })
+  }
+  
 
   useEffect(() => {
     setMessages((prev) => [

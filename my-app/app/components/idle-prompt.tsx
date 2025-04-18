@@ -1,174 +1,181 @@
-"use client"
+// app/components/idle‑prompt.tsx
+"use client";
 
-import { useState, useEffect, useRef } from "react"
-import { ChevronDown, Lightbulb } from "lucide-react"
-import type { Subject } from "../learning-assistant/page"
-import { logChallengeAttempt } from "../lib/logChallengeAttempt"
+import { useState, useEffect, useRef } from "react";
+import { ChevronDown, Lightbulb }      from "lucide-react";
+import type { Subject }                from "../learning-assistant/page";
+import { logChallengeAttempt }         from "../lib/logChallengeAttempt";
 
 interface ChallengeBoxProps {
-  subject: Subject
-  xpPoints: number
-  userId: string
-  onEarnXp: (xp: number) => void
-  onPromptClick: (prompt: string) => void
+  subject:   Subject;
+  level:     number;       // pass in current user level
+  userId:    string;
+  onEarnXp:  (xp: number) => void;
+  onPromptClick: (prompt: string) => void;
 }
 
-interface ChallengeQuestion {
-  id: string
-  text: string
-  aiPrompt: string
-  completed: boolean
-  xpRequired: number
-  xpReward: number
+interface Challenge {
+  id:         number;
+  prompt:     string;
+  difficulty: number;
 }
 
-export function IdlePrompt({ subject, xpPoints, userId, onEarnXp, onPromptClick }: ChallengeBoxProps) {
-  const [questions, setQuestions] = useState<ChallengeQuestion[]>([])
-  const [currentXP, setCurrentXP] = useState(xpPoints)
-  const [isOpen, setIsOpen] = useState(false)
-  const detailsRef = useRef<HTMLDetailsElement>(null)
+function getDifficultyRangeForLevel(level: number): { min: number; max: number } {
+  if (level < 10) {
+    // Beginner users
+    return { min: 1, max: 3 }
+  } else if (level < 20) {
+    // Intermediate users
+    return { min: 4, max: 6 }
+  } else {
+    // Advanced users
+    return { min: 7, max: 9 }
+  }
+}
 
-  // Keep XP in sync with outside state (prop)
+export function IdlePrompt({
+  subject,
+  level,
+  userId,
+  onEarnXp,
+  onPromptClick,
+}: ChallengeBoxProps) {
+  const [challenges, setChallenges] = useState<Challenge[]>([]);
+  const [currentXP, setCurrentXP]   = useState(0);
+  const [isOpen, setIsOpen]         = useState(false);
+  const detailsRef                  = useRef<HTMLDetailsElement>(null);
+  const [isLoading, setIsLoading]   = useState(true);
+
+  // keep XP in sync if parent updates it
   useEffect(() => {
-    setCurrentXP(xpPoints)
-  }, [xpPoints])
+    // you might pull this from props too
+    // setCurrentXP(xpPoints);
+  }, []);
 
+  // load from our new API whenever subject or level changes
   useEffect(() => {
-    const raw = getPromptsForSubject(subject)
-    const generated = raw.map(({ text, aiPrompt }, index) => ({
-      id: `${subject}-${index}`,
-      text,
-      aiPrompt,
-      completed: false,
-      xpRequired: index * 10,
-      xpReward: 10,
-    }))
-    setQuestions(generated)
-  }, [subject])
-
-  const updateXpInDatabase = async (newXp: number) => {
     const subjectMap: Record<Subject, number> = {
       math: 1,
       reading: 2,
       spelling: 3,
       exploration: 4,
     }
+  
+    async function fetchChallenges() {
+      setIsLoading(true)
+      try {
+        
+        const subjId = subjectMap[subject]
+        if (!subjId) throw new Error("Invalid subject")
+        
+          
+        // derive difficulty window from user level
+        const { min: minDiff, max: maxDiff } = getDifficultyRangeForLevel(level)
 
-    const subjectId = subjectMap[subject]
-    if (!userId || !subjectId) return
+        console.log("📦 Fetching challenges for:", {
+          subject: subject,
+          subject_id: subjId,
+          level,
+          minDiff,
+          maxDiff
+        })
+        
+        const res = await fetch(
+          `/api/xp/challenges?subject_id=${subjId}&min_difficulty=${minDiff}&max_difficulty=${maxDiff}`
+        )
+        
 
-    await fetch("/api/progress/update", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: userId,
-        subject: subjectId,
-        xp: newXp,
-      }),
-    })
-  }
+  
+        if (!res.ok) {
+          console.error(`Fetch challenges failed: HTTP ${res.status}`)
+          setChallenges([])
+        } else {
+          const list: Challenge[] = await res.json()
+          setChallenges(list)
+        }
+      } catch (err) {
+        console.error("Failed to load challenges:", err)
+        setChallenges([])
+      } finally {
+        setIsLoading(false)
+      }
+    }
+  
+    fetchChallenges()
+  }, [subject, level])
 
-  const handleClick = async (question: ChallengeQuestion) => {
-    if (question.completed || currentXP < question.xpRequired) return
 
-    // Trigger assistant AI prompt
-    onPromptClick(question.aiPrompt)
+  const handleClick = async (c: Challenge) => {
+    // one‑time only:
+    if (currentXP >= 0 && /* replace with your logic to mark done */ false)
+      return;
 
-    // Update state and backend
-    const newXp = currentXP + question.xpReward
-    onEarnXp(question.xpReward)
-    setCurrentXP(newXp)
-    updateXpInDatabase(newXp)
+    // 1) fire AI prompt
+    onPromptClick(c.prompt);
 
-    // Mark question as completed
-    setQuestions((prev) =>
-      prev.map((q) => (q.id === question.id ? { ...q, completed: true } : q))
-    )
+    // 2) award XP (we’ll say difficulty×10)
+    const xpReward = c.difficulty * 10;
+    const newXp    = currentXP + xpReward;
+    onEarnXp(xpReward);
+    setCurrentXP(newXp);
 
-    // Log the attempt
+    // 3) log attempt server‑side
     try {
       await logChallengeAttempt({
-        user_id: userId,
-        subject,
-        correct: true,
-        attempts: 1,
-        used_hint: false,
-        xp_earned: question.xpReward,
-      })
-    } catch (err) {
-      console.error("❌ Failed to log challenge:", err)
+        user_id:      userId,
+        challenge_id: c.id,
+        success:      true,
+        attempts:     1,
+        used_hint:    false,
+        xp_earned:    xpReward,
+      });
+    } catch (e) {
+      console.error("❌ logChallengeAttempt failed:", e);
     }
-  }
+  };
 
   return (
     <details
       ref={detailsRef}
-      className="bg-yellow-50 border border-yellow-200 rounded-2xl p-4 z-50 group"
-      onToggle={() => setIsOpen(detailsRef.current?.open || false)}
+      className="bg-yellow-50 border rounded p-4 z-50"
+      onToggle={() => setIsOpen(!!detailsRef.current?.open)}
     >
-      <summary className="flex items-center justify-between cursor-pointer list-none text-yellow-700 font-semibold text-lg mb-2">
-        <div className="flex items-center gap-2">
+      <summary className="flex justify-between cursor-pointer mb-2">
+        <div className="flex items-center gap-2 text-yellow-700 font-semibold">
           <Lightbulb className="w-5 h-5 text-yellow-500" />
-          Challenge Questions
+          Challenge Questions (level {level})
         </div>
         <ChevronDown
-          className={`w-5 h-5 text-yellow-600 transition-transform duration-300 ${
+          className={`w-5 h-5 transition-transform ${
             isOpen ? "rotate-180" : ""
           }`}
         />
       </summary>
 
       <ul className="space-y-2">
-        {questions.map((q) => (
-          <li
-            key={q.id}
-            onClick={() => handleClick(q)}
-            className={`p-2 rounded-md cursor-pointer transition ${
-              q.completed
-                ? "line-through text-gray-400"
-                : currentXP < q.xpRequired
-                ? "text-gray-400 cursor-not-allowed"
-                : "hover:bg-yellow-100 text-yellow-900"
-            }`}
-          >
-            {q.text}{" "}
-            {q.completed
-              ? "✅"
-              : currentXP < q.xpRequired
-              ? `🔒 Requires ${q.xpRequired} XP`
-              : `(+${q.xpReward} XP)`}
-          </li>
-        ))}
+        {isLoading ? (
+          <li className="text-gray-500 italic">Loading challenges…</li>
+        ) : challenges.length === 0 ? (
+          <li className="text-gray-500 italic">No challenges available.</li>
+        ) : (
+          challenges.map((c) => (
+            <li
+              key={c.id}
+              onClick={() => handleClick(c)}
+              className="p-2 rounded-md cursor-pointer hover:bg-yellow-100"
+            >
+              {c.prompt}{" "}
+              <span className="text-sm text-yellow-700">
+                +{c.difficulty * 10} XP
+              </span>
+            </li>
+          ))
+        )}
       </ul>
 
-      <p className="mt-3 text-sm text-yellow-800">Current XP: {currentXP}</p>
+      <p className="mt-3 text-sm text-yellow-800">
+        Current XP: {currentXP}
+      </p>
     </details>
-  )
-}
-
-function getPromptsForSubject(subject: Subject): { text: string; aiPrompt: string }[] {
-  const prompts = {
-    math: [
-      { text: "Solve a tricky multiplication problem!", aiPrompt: "Give the student a multiplication challenge involving two-digit numbers." },
-      { text: "Try a logic puzzle with numbers!", aiPrompt: "Present a number-based logic riddle suitable for 10-year-olds." },
-      { text: "What’s the next number in the pattern?", aiPrompt: "Create a number pattern and ask the student to find the next number." },
-    ],
-    reading: [
-      { text: "Read a short story and summarize it!", aiPrompt: "Share a short 2-paragraph story and ask the student to summarize." },
-      { text: "Guess the character from these clues!", aiPrompt: "Describe a fictional character and ask the student to guess who it is." },
-      { text: "Find the main idea of a paragraph!", aiPrompt: "Present a paragraph and ask what the main idea is." },
-    ],
-    spelling: [
-      { text: "Spell a really tricky word!", aiPrompt: "Give a challenging spelling word appropriate for a 10-year-old and ask them to spell it." },
-      { text: "Unscramble this word challenge!", aiPrompt: "Give a scrambled word and ask the student to unscramble it." },
-      { text: "Guess the spelling rule used in a sentence!", aiPrompt: "Present a sentence and ask what spelling rule is used in it." },
-    ],
-    exploration: [
-      { text: "Guess the planet based on facts!", aiPrompt: "List 3 fun facts about a planet and ask the student to guess which planet it is." },
-      { text: "Solve a mystery about animals!", aiPrompt: "Describe clues about an animal and ask the student to figure it out." },
-      { text: "What’s the science behind rainbows?", aiPrompt: "Ask the student to explain how rainbows form in simple terms." },
-    ],
-  }
-
-  return prompts[subject]
+  );
 }

@@ -32,6 +32,7 @@ export default function LearningAssistant() {
   const focusTimerRef = useRef<NodeJS.Timeout | null>(null)
   const emotionalCheckTimerRef = useRef<NodeJS.Timeout | null>(null)
   const [userId, setUserId] = useState("")
+  const [userLevel, setUserLevel]               = useState(1)      
   const subjectMap: Record<Subject, number> = {
     math: 1,
     reading: 2,
@@ -47,21 +48,7 @@ export default function LearningAssistant() {
       })
   }, [])
 
-  useEffect(() => {
-    const fetchUserProgress = async () => {
-      if (!userId) return
-      const subjectId = subjectMap[activeSubject]
-      if (!subjectId) return
-  
-      const progressRes = await fetch(
-        `/api/progress?user_id=${userId}&subject=${subjectId}`
-      )
-      const data = await progressRes.json()
-      setXpPoints(data?.xp || 0)
-    }
-  
-    fetchUserProgress()
-  }, [userId, activeSubject])
+
   
   // Reset idle timer on activity
   const handleActivity = () => {
@@ -189,6 +176,22 @@ export default function LearningAssistant() {
     // In a real app, you would use this emotion to adapt the learning experience
   }
 
+    // 2️⃣ whenever we have both userId & activeSubject, fetch XP+level:
+    useEffect(() => {
+      const loadProgress = async () => {
+        if (!userId) return
+        const subjectId = subjectMap[activeSubject]
+        if (!subjectId) return
+  
+        const res = await fetch(`/api/progress?user_id=${userId}&subject=${subjectId}`)
+        const data = await res.json()
+        setXpPoints(data.xp    ?? 0)
+        setUserLevel(data.level ?? 1)      // ← populate level
+      }
+  
+      loadProgress()
+    }, [userId, activeSubject])
+    
   return (
     <div className="flex h-screen w-full overflow-hidden">
       {/* Sidebar with subject navigation - hidden in focus mode */}
@@ -218,14 +221,14 @@ export default function LearningAssistant() {
         <div className="flex flex-col md:flex-row gap-4 h-full">
           {/* Main chat area */}
           <div className="flex-1 flex flex-col">
-            <ProgressTracker xpPoints={xpPoints} />
+            <ProgressTracker xpPoints={xpPoints} level={userLevel} />
 
             {/* Challenge Questions */}
             <IdlePrompt
               subject={activeSubject}
-              xpPoints={xpPoints}
+              level={userLevel}           // <— from your progress fetch
               userId={userId}
-              onEarnXp={(xp) => setXpPoints((prev) => prev + xp)}
+              onEarnXp={(xp) => setXpPoints(prev => prev + xp)}
               onPromptClick={async (promptText) => {
                 const typingId = "typing"
                 const userId = crypto.randomUUID()

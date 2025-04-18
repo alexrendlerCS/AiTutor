@@ -1,4 +1,4 @@
-// /app/api/xp/challenges/log/route.ts
+// app/api/xp/challenges/log/route.ts
 
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
@@ -9,38 +9,47 @@ const supabase = createClient(
 )
 
 export async function POST(req: NextRequest) {
-  const body = await req.json()
-  const { user_id, subject, correct, attempts, used_hint, xp_earned } = body
-
-  if (!user_id || !subject || attempts === undefined || xp_earned === undefined) {
-    return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
-  }
-
-  const subjectMap: Record<string, number> = {
-    math: 1,
-    reading: 2,
-    spelling: 3,
-    exploration: 4,
-  }
-
-  const subject_id = subjectMap[subject.toLowerCase()]
-  if (!subject_id) {
-    return NextResponse.json({ error: "Invalid subject" }, { status: 400 })
-  }
-
-  const { error } = await supabase.from("user_challenge_attempts").insert({
+  const {
     user_id,
-    subject_id,
-    correct,
+    challenge_id,
+    success,
     attempts,
-    used_hint,
     xp_earned,
-  })
+  } = await req.json()
+
+  // Basic validation: all these fields are required
+  if (
+    !user_id ||
+    challenge_id === undefined ||
+    success === undefined ||
+    attempts === undefined ||
+    xp_earned === undefined
+  ) {
+    return NextResponse.json(
+      { error: "Missing required fields" },
+      { status: 400 }
+    )
+  }
+
+  // Insert into user_challenge_attempts
+  const { error } = await supabase
+    .from("user_challenge_attempts")
+    .insert({
+      user_id,
+      challenge_id,
+      success,
+      attempts,
+      xp_earned,
+      // attempt_time is assumed to default to now() in your schema
+    })
 
   if (error) {
     console.error("Error logging challenge:", error)
-    return NextResponse.json({ error: "Failed to log challenge" }, { status: 500 })
+    return NextResponse.json(
+      { error: error.message || "Failed to log challenge" },
+      { status: 500 }
+    )
   }
 
-  return NextResponse.json({ success: true })
+  return NextResponse.json({ success: true }, { status: 200 })
 }
