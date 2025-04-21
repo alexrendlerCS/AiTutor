@@ -33,12 +33,14 @@ export async function GET(req: NextRequest) {
   }
 
   const { data, error } = await supabase
-    .from("challenges")
-    .select("id, prompt, difficulty")
-    .match({ subject_id })
-    .gte("difficulty", min_difficulty)
-    .lte("difficulty", max_difficulty)
-    .order("difficulty", { ascending: true })
+      .from("challenges")
+      .select("id, prompt, difficulty")
+      .match({ subject_id })
+      .gte("difficulty", min_difficulty)
+      .lte("difficulty", max_difficulty)
+      .lte("id", 37) 
+      .order("difficulty", { ascending: true });
+
 
 
   if (error) {

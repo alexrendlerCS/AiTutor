@@ -1,12 +1,10 @@
-// app/api/xp/challenges/log/route.ts
-
-import { NextRequest, NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+);
 
 export async function POST(req: NextRequest) {
   const {
@@ -15,9 +13,10 @@ export async function POST(req: NextRequest) {
     success,
     attempts,
     xp_earned,
-  } = await req.json()
+    used_hint = false, // optional field, default to false
+  } = await req.json();
 
-  // Basic validation: all these fields are required
+  // ✅ Basic validation
   if (
     !user_id ||
     challenge_id === undefined ||
@@ -28,11 +27,32 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: "Missing required fields" },
       { status: 400 }
-    )
+    );
   }
 
-  // Insert into user_challenge_attempts
-  const { error } = await supabase
+  // ✅ Check for existing attempt (to avoid UNIQUE constraint violation)
+  const { data: existing, error: checkError } = await supabase
+    .from("user_challenge_attempts")
+    .select("id")
+    .eq("user_id", user_id)
+    .eq("challenge_id", challenge_id)
+    .maybeSingle();
+
+  if (checkError) {
+    console.error("❌ Error checking existing attempt:", checkError);
+    return NextResponse.json(
+      { error: "Error checking existing attempt" },
+      { status: 500 }
+    );
+  }
+
+  if (existing) {
+    console.log("⚠️ Duplicate challenge attempt skipped.");
+    return NextResponse.json({ alreadyExists: true }, { status: 200 });
+  }
+
+  // ✅ Insert new challenge attempt
+  const { error: insertError } = await supabase
     .from("user_challenge_attempts")
     .insert({
       user_id,
@@ -40,16 +60,15 @@ export async function POST(req: NextRequest) {
       success,
       attempts,
       xp_earned,
-      // attempt_time is assumed to default to now() in your schema
-    })
+    });
 
-  if (error) {
-    console.error("Error logging challenge:", error)
+  if (insertError) {
+    console.error("❌ Error inserting challenge attempt:", insertError);
     return NextResponse.json(
-      { error: error.message || "Failed to log challenge" },
+      { error: "Failed to insert challenge attempt" },
       { status: 500 }
-    )
+    );
   }
 
-  return NextResponse.json({ success: true }, { status: 200 })
+  return NextResponse.json({ success: true }, { status: 200 });
 }

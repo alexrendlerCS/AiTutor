@@ -21,7 +21,7 @@ const getSubjectId = async (subjectName: string): Promise<number | null> => {
 
 export default function LearningAssistant() {
   const [activeSubject, setActiveSubject] = useState<Subject>("math")
-  const [xpPoints, setXpPoints] = useState(120)
+  const [xpPoints, setXpPoints] = useState(0)
   const [focusMode, setFocusMode] = useState(false)
   const [focusTimeRemaining, setFocusTimeRemaining] = useState(5 * 60) // 5 minutes in seconds
   const [isIdle, setIsIdle] = useState(false)
@@ -32,7 +32,8 @@ export default function LearningAssistant() {
   const focusTimerRef = useRef<NodeJS.Timeout | null>(null)
   const emotionalCheckTimerRef = useRef<NodeJS.Timeout | null>(null)
   const [userId, setUserId] = useState("")
-  const [userLevel, setUserLevel]               = useState(1)      
+  const [userLevel, setUserLevel]               = useState(1)     
+  const [currentChallengeId, setCurrentChallengeId] = useState<number | null>(null) 
   const subjectMap: Record<Subject, number> = {
     math: 1,
     reading: 2,
@@ -192,6 +193,54 @@ export default function LearningAssistant() {
       loadProgress()
     }, [userId, activeSubject])
     
+    const handlePromptClick = async (promptText: string, challengeId: number) => {
+      setCurrentChallengeId(challengeId)   
+      const typingId = "typing"
+      const userMsgId = crypto.randomUUID()
+      const assistantId = crypto.randomUUID()
+    
+      // 1. Show user message and assistant typing
+      window.dispatchEvent(
+        new CustomEvent("ai-message", {
+          detail: [
+            {
+              id: userMsgId,
+              content: promptText,
+              sender: "user",
+            },
+            {
+              id: typingId,
+              content: "",
+              sender: "assistant",
+              isTyping: true,
+            },
+          ],
+        })
+      )
+    
+      // 2. Fetch assistant response
+      const response = await fetch("/api/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: promptText, subject: activeSubject }),
+      })
+    
+      const { reply } = await response.json()
+    
+      // 3. Dispatch final assistant reply
+      window.dispatchEvent(
+        new CustomEvent("ai-message", {
+          detail: [
+            {
+              id: assistantId,
+              content: reply,
+              sender: "assistant",
+            },
+          ],
+        })
+      )
+    }
+    
   return (
     <div className="flex h-screen w-full overflow-hidden">
       {/* Sidebar with subject navigation - hidden in focus mode */}
@@ -219,70 +268,41 @@ export default function LearningAssistant() {
         </div>
 
         <div className="flex flex-col md:flex-row gap-4 h-full">
-          {/* Main chat area */}
-          <div className="flex-1 flex flex-col">
-            <ProgressTracker xpPoints={xpPoints} level={userLevel} />
+  {/* Main chat area */}
+  <div className="flex-1 flex flex-col">
+    <ProgressTracker xpPoints={xpPoints} level={userLevel} />
 
-            {/* Challenge Questions */}
-            <IdlePrompt
-              subject={activeSubject}
-              level={userLevel}           // <— from your progress fetch
-              userId={userId}
-              onEarnXp={(xp) => setXpPoints(prev => prev + xp)}
-              onPromptClick={async (promptText) => {
-                const typingId = "typing"
-                const userId = crypto.randomUUID()
-                const assistantId = crypto.randomUUID()
+    {/* Challenge Questions */}
+    {userId && (
+      <IdlePrompt
+      subject={activeSubject}
+      level={userLevel}
+      userId={userId}
+      initialXP={xpPoints}
+      onEarnXp={(xp) => setXpPoints((prev) => prev + xp)}
+      onPromptClick={(prompt, id) => {
+        handlePromptClick(prompt, id)
+      }}      
+    />
+    
+    )}
 
-                // 1. Show user message and assistant typing
-                window.dispatchEvent(
-                  new CustomEvent("ai-message", {
-                    detail: [
-                      {
-                        id: userId,
-                        content: promptText,
-                        sender: "user",
-                      },
-                      {
-                        id: typingId,
-                        content: "",
-                        sender: "assistant",
-                        isTyping: true,
-                      },
-                    ],
-                  })
-                )
+<ChatInterface
+  subject={activeSubject}
+  onSendMessage={handleSendMessage}
+  userId={userId}
+  currentChallengeId={currentChallengeId} // ✅ new
+/>
 
-                // 2. Fetch response
-                const response = await fetch("/api/ai", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ message: promptText, subject: activeSubject }),
-                })
 
-                const { reply } = await response.json()
 
-                // 3. Remove typing and show assistant reply
-                window.dispatchEvent(
-                  new CustomEvent("ai-message", {
-                    detail: [
-                      {
-                        id: assistantId,
-                        content: reply,
-                        sender: "assistant",
-                      },
-                    ],
-                  })
-                )
-              }}
-            />
+    {/* Emotional check-in */}
+    {showEmotionalCheckIn && (
+      <EmotionalCheckIn onEmotionSelected={handleEmotionSelected} />
+    )}
+  </div>
+</div>
 
-            <ChatInterface subject={activeSubject} onSendMessage={handleSendMessage} />
-
-            {/* Emotional check-in */}
-            {showEmotionalCheckIn && <EmotionalCheckIn onEmotionSelected={handleEmotionSelected} />}
-          </div>
-        </div>
       </div>
     </div>
   )

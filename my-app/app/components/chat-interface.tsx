@@ -9,6 +9,8 @@ type OpenAIMessage = { role: "user" | "assistant"; content: string };
 import { cn } from "../lib/utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip"
 import { formatAIResponse } from "../utils/formatAIResponse"
+import { logChallengeAttempt } from "../lib/logChallengeAttempt";
+
 
 interface Message {
   id: string
@@ -20,9 +22,13 @@ interface Message {
 interface ChatInterfaceProps {
   subject: Subject
   onSendMessage: (message: string) => void
+  userId: string
+  currentChallengeId: number | null 
 }
 
-export function ChatInterface({ subject, onSendMessage }: ChatInterfaceProps) {
+
+export function ChatInterface({ subject, onSendMessage, userId, currentChallengeId }: ChatInterfaceProps) {
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
@@ -36,10 +42,11 @@ export function ChatInterface({ subject, onSendMessage }: ChatInterfaceProps) {
   const [guessCount, setGuessCount] = useState(0)
 
   const isAnswerCorrect = (assistantMessage: string): boolean =>
-    /\b(that'?s\s+(it|right|correct)|you\s+got\s+it|exactly)\b/i.test(assistantMessage)
+    assistantMessage.trim().startsWith("Correct!");
+
   
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!inputValue.trim()) return
   
     // 1️⃣ create the new user message
@@ -49,23 +56,23 @@ export function ChatInterface({ subject, onSendMessage }: ChatInterfaceProps) {
       sender: "user",
     }
   
-    // 2️⃣ build an updated list of messages that *includes* this new one
+    // 2️⃣ build updated list
     const beforeTyping = [...messages, userMessage]
   
-    // 3️⃣ put that on screen
+    // 3️⃣ show user message
     setMessages(beforeTyping)
-    setGuessCount(prev => prev + 1)
+    setGuessCount((prev) => prev + 1)
     onSendMessage(inputValue)
     setInputValue("")
   
-    // 4️⃣ now insert the "assistant is typing" bubble
+    // 4️⃣ insert typing bubble
     const typingId = "typing"
     const withTyping = beforeTyping
       .filter((m) => m.id !== typingId)
       .concat({ id: typingId, content: "", sender: "assistant", isTyping: true })
     setMessages(withTyping)
   
-    // 5️⃣ build a history for the API from our **updated** list
+    // 5️⃣ build message history for API
     const historyForAPI: OpenAIMessage[] = beforeTyping
       .filter((m) => m.sender === "user" || m.sender === "assistant")
       .map((m) => ({
@@ -74,44 +81,86 @@ export function ChatInterface({ subject, onSendMessage }: ChatInterfaceProps) {
       }))
       .concat({ role: "user", content: inputValue })
   
-    // 6️⃣ fire off the request
-    fetch("/api/ai", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject, messages: historyForAPI }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        const assistantReply = data.reply
-  
-        // replace the typing bubble with the real reply
-        setMessages((prev) =>
-          prev.filter((m) => m.id !== typingId).concat({
-            id: crypto.randomUUID(),
-            content: assistantReply,
-            sender: "assistant",
-          })
-        )
-  
-        const correct = isAnswerCorrect(assistantReply)
-  
-        window.dispatchEvent(
-          new CustomEvent("answer-attempt", {
-            detail: { subject, correct, attempts: guessCount + 1 },
-          })
-        )
-        if (correct) setGuessCount(0)
+    // 6️⃣ send to AI backend
+    try {
+      const res = await fetch("/api/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject, messages: historyForAPI }),
       })
-      .catch(() => {
-        setMessages((prev) =>
-          prev.filter((m) => m.id !== typingId).concat({
-            id: crypto.randomUUID(),
-            content:
-              "Hmm... I'm having trouble responding right now. Try again in a moment!",
-            sender: "assistant",
-          })
+  
+      const data = await res.json()
+      const assistantReply = data.reply
+  
+      // 7️⃣ update UI with real response
+      setMessages((prev) =>
+        prev.filter((m) => m.id !== typingId).concat({
+          id: crypto.randomUUID(),
+          content: assistantReply,
+          sender: "assistant",
+        })
+      )
+  
+      const correct = isAnswerCorrect(assistantReply)
+  
+      const xpEarned =
+      correct && guessCount + 1 === 1 ? 10 :
+      correct && guessCount + 1 <= 2 ? 7 :
+      correct ? 5 : 1;
+
+      window.dispatchEvent(
+        new CustomEvent("answer-attempt", {
+          detail: {
+            subject,
+            correct,
+            attempts: guessCount + 1,
+            xpEarned,
+            challengeId: currentChallengeId,
+          }
+        })
+      )
+
+      
+  
+      // 8️⃣ ⬇️ Try logging attempt if correct
+      if (correct) {
+        // This part should be dynamic — placeholder logic for now
+        const possibleChallenge = messages.find((m) =>
+          /(\d+)\s*×\s*(\d+)/.test(m.content)
         )
-      })
+  
+        // You’ll want to pass challenge ID from <IdlePrompt /> in a real scenario
+        const challengeId = currentChallengeId
+
+  
+        if (challengeId && typeof window !== "undefined") {
+          try {
+            await logChallengeAttempt({
+              user_id: userId, // make sure userId is accessible here!
+              challenge_id: challengeId,
+              success: true,
+              attempts: guessCount + 1,
+              xp_earned:
+                guessCount + 1 === 1 ? 10 : guessCount + 1 <= 2 ? 7 : 5,
+            })
+          } catch (err) {
+            console.error("❌ Failed to log challenge attempt:", err)
+          }
+        }
+  
+        setGuessCount(0)
+      }
+    } catch (err) {
+      console.error("❌ AI response error:", err)
+      setMessages((prev) =>
+        prev.filter((m) => m.id !== typingId).concat({
+          id: crypto.randomUUID(),
+          content:
+            "Hmm... I'm having trouble responding right now. Try again in a moment!",
+          sender: "assistant",
+        })
+      )
+    }
   }
   
 

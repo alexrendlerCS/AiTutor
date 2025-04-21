@@ -6,12 +6,13 @@ export async function POST(req: NextRequest) {
     const { subject } = body;
 
     const systemPrompt = `
-You're a supportive tutor for a 9-year-old student learning ${subject}.
-DO NOT give direct answers immediately.
-Instead, guide the student with small hints or questions that help them discover the answer.
-Praise effort, correct gently, and reward progress.
-Avoid repeating greetings. Be concise and encouraging for kids with short attention spans.
-`;
+      You're a supportive tutor for a 9-12-year-old student learning ${subject}.
+      DO NOT give direct answers immediately.
+      Instead, guide the student with small hints or questions that help them discover the answer.
+      Praise effort, correct gently, and reward progress.
+      Avoid repeating greetings. Be concise and encouraging for kids with short attention spans.
+      Respond to correct answers by first saying "Correct!" then continuing on with the message
+      `;
 
     // Determine whether it's a single prompt or full message history
     const chatMessages =
