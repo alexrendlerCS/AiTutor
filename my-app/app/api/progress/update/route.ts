@@ -8,6 +8,11 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+// Function to calculate XP needed for a specific level
+function getRequiredXpForLevel(level: number): number {
+  return Math.floor(100 * Math.pow(level, 1.15)); // XP grows with level
+}
+
 export async function POST(req: NextRequest) {
   const { user_id, subject, xp } = await req.json();
 
@@ -27,7 +32,6 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (fetchError && fetchError.code !== "PGRST116") {
-    // Ignore 'row not found' error, which is fine for first time
     console.error("Error fetching progress:", fetchError);
     return NextResponse.json(
       { error: "Could not fetch current progress" },
@@ -35,26 +39,35 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const currentXP = progress?.xp ?? 0;
-  const currentLevel = progress?.level ?? 1;
+  let currentXP = progress?.xp ?? 0;
+  let currentLevel = progress?.level ?? 1;
 
-  // Step 2: Add XP and calculate new level
-  const totalXP = xp; // Use XP from client directly
-  const levelUps = Math.floor(totalXP / 100);
-  const newXP = totalXP % 100;
-  const newLevel = currentLevel + levelUps;
+  // Step 2: Add XP and level up accordingly
+  let totalXP = currentXP + xp;
+
+  while (totalXP >= getRequiredXpForLevel(currentLevel)) {
+    totalXP -= getRequiredXpForLevel(currentLevel);
+    currentLevel += 1;
+  }
 
   // Step 3: Update or insert progress
   const { error: updateError } = await supabase.from("user_progress").upsert(
     {
       user_id,
       subject_id: subject,
-      xp: newXP,
-      level: newLevel,
+      xp: totalXP,
+      level: currentLevel,
     },
-    { onConflict: "user_id,subject_id" } // Use correct conflict target
+    { onConflict: "user_id,subject_id" }
   );
-  console.log("📝 Final XP write:", { user_id, subject, newXP, newLevel });
+
+  console.log("📝 Final XP write:", {
+    user_id,
+    subject,
+    xp: totalXP,
+    level: currentLevel,
+  });
+
   if (updateError) {
     console.error("Error updating progress:", updateError);
     return NextResponse.json(
@@ -63,5 +76,5 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  return NextResponse.json({ xp: newXP, level: newLevel });
+  return NextResponse.json({ xp: totalXP, level: currentLevel });
 }
