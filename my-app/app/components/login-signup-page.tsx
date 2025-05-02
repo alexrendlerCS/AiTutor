@@ -1,70 +1,102 @@
 // AITutor/my-app/app/components/login-signup-page.tsx
-"use client"
+"use client";
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "../lib/supabase-client";
 
 export default function LoginSignupPage() {
-  const [isLogin, setIsLogin] = useState(true)
+  const [isLogin, setIsLogin] = useState(true);
   const [form, setForm] = useState({
     username: "",
     full_name: "",
     email: "",
     password: "",
-  })
-  const [error, setError] = useState("")
-  const [success, setSuccess] = useState("")
-  const router = useRouter()
+  });
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const router = useRouter();
 
   const toggleMode = () => {
-    setIsLogin(!isLogin)
-    setError("")
-    setSuccess("")
+    setIsLogin(!isLogin);
+    setError("");
+    setSuccess("");
     setForm({
       username: "",
       full_name: "",
       email: "",
       password: "",
-    })
-  }
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError("")
-    setSuccess("")
-  
-    const endpoint = isLogin ? "/api/auth/login" : "/api/auth/signup"
-  
-    const payload = isLogin
-      ? {
-          login: form.email,
-          password: form.password,
-        }
-      : form
-  
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-  
-    const data = await res.json()
-    if (!res.ok) {
-      setError(data.error || "Oops! Something went wrong. Try again! 😓")
-    } else {
-      setSuccess(
-        isLogin
-          ? "Welcome back, superstar! 🌟"
-          : "You're all signed up! Redirecting... 🚀"
-      )
-      document.cookie = `token=${data.token}; path=/`
-  
-      router.push("/learning-assistant") 
+    e.preventDefault();
+    setError("");
+    setSuccess("");
 
+    if (!form.email || !form.password) {
+      setError("Email and password are required.");
+      return;
     }
-  }
-  
-  
+
+    try {
+      let authResponse;
+
+      if (isLogin) {
+        authResponse = await supabase.auth.signInWithPassword({
+          email: form.email,
+          password: form.password,
+        });
+      } else {
+        authResponse = await supabase.auth.signUp({
+          email: form.email,
+          password: form.password,
+          options: {
+            data: {
+              full_name: form.full_name,
+              username: form.username,
+            },
+          },
+        });
+      }
+
+      const { error } = authResponse;
+      if (error) {
+        setError(error.message);
+        return;
+      }
+
+      // ✅ Ensure the session is fully loaded & cookie is synced
+      await supabase.auth.getSession();
+
+      setSuccess(isLogin ? "Welcome back! 🌟" : "You're signed up! 🚀");
+
+      // ✅ Fetch authenticated user (optional)
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        console.warn("No user found, fallback to intro quiz");
+        return router.push("/intro-quiz");
+      }
+
+      // ✅ Check profile completion status
+      const profileRes = await fetch("/api/profile/status");
+      const profileData = await profileRes.json();
+
+      if (profileData.completed_intro_quiz) {
+        router.push("/learning-assistant");
+      } else {
+        router.push("/intro-quiz");
+      }
+    } catch (err) {
+      console.error("Auth error:", err);
+      setError("Something went wrong. Please try again.");
+    }
+  };
+
   return (
     <div className="max-w-md mx-auto mt-20 bg-white rounded-xl shadow-md p-6">
       <h2 className="text-xl font-bold text-center mb-4">
@@ -78,9 +110,7 @@ export default function LoginSignupPage() {
               type="text"
               placeholder="Choose a Username"
               value={form.username}
-              onChange={(e) =>
-                setForm({ ...form, username: e.target.value })
-              }
+              onChange={(e) => setForm({ ...form, username: e.target.value })}
               className="w-full p-2 border rounded"
               required
             />
@@ -88,9 +118,7 @@ export default function LoginSignupPage() {
               type="text"
               placeholder="Your Full Name"
               value={form.full_name}
-              onChange={(e) =>
-                setForm({ ...form, full_name: e.target.value })
-              }
+              onChange={(e) => setForm({ ...form, full_name: e.target.value })}
               className="w-full p-2 border rounded"
               required
             />
@@ -98,11 +126,12 @@ export default function LoginSignupPage() {
         )}
 
         <input
-          type="text"
-          placeholder={isLogin ? "Email or Username" : "Email (optional)"}
+          type="email"
+          placeholder="Email"
           value={form.email}
           onChange={(e) => setForm({ ...form, email: e.target.value })}
           className="w-full p-2 border rounded"
+          required
         />
 
         <input
@@ -114,9 +143,7 @@ export default function LoginSignupPage() {
           required
         />
 
-        {error && (
-          <p className="text-red-500 text-sm text-center">{error}</p>
-        )}
+        {error && <p className="text-red-500 text-sm text-center">{error}</p>}
         {success && (
           <p className="text-green-600 text-sm text-center font-semibold">
             {success}
@@ -138,5 +165,5 @@ export default function LoginSignupPage() {
         </button>
       </p>
     </div>
-  )
+  );
 }

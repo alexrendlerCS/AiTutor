@@ -1,59 +1,38 @@
-import { NextRequest, NextResponse } from "next/server"
-import bcrypt from "bcrypt"
-import jwt from "jsonwebtoken"
-import { createClient } from "@supabase/supabase-js"
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,  
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
-
-
-const JWT_SECRET = process.env.JWT_SECRET || "super-secret-key" // Use env var in production
+import { NextRequest, NextResponse } from "next/server";
+import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
+import { cookies } from "next/headers";
 
 export async function POST(req: NextRequest) {
-  const { login, password } = await req.json()
+  const supabase = createServerComponentClient({ cookies: () => cookies() });
 
-  if (!login || !password) {
-    return NextResponse.json({ error: "Login and password required" }, { status: 400 })
+  const { email, password } = await req.json();
+
+  if (!email || !password) {
+    return NextResponse.json(
+      { error: "Email and password are required" },
+      { status: 400 }
+    );
   }
 
-  // Determine if login is email or username
-  let query = supabase.from("users").select("*").limit(1)
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
 
-  if (login.includes("@")) {
-    query = query.eq("email", login)
-  } else {
-    query = query.eq("username", login)
+  if (error || !data.user) {
+    return NextResponse.json(
+      { error: error?.message || "Invalid credentials" },
+      { status: 401 }
+    );
   }
-
-  const { data, error } = await query.single()
-
-  if (error || !data) {
-    return NextResponse.json({ error: "Invalid credentials" }, { status: 401 })
-  }
-
-  const isValid = await bcrypt.compare(password, data.password_hash)
-  if (!isValid) {
-    return NextResponse.json({ error: "Invalid credentials" }, { status: 401 })
-  }
-
-  const token = jwt.sign(
-    {
-      userId: data.id,
-      username: data.username,
-      email: data.email,
-      full_name: data.full_name, 
-    },
-    JWT_SECRET,
-    { expiresIn: "7d" }
-  )
-  
 
   return NextResponse.json({
-    token,
-    userId: data.id,
-    username: data.username,
-    email: data.email,
-  })
+    message: "Login successful",
+    user: {
+      id: data.user.id,
+      email: data.user.email,
+      full_name: data.user.user_metadata?.full_name || null,
+      username: data.user.user_metadata?.username || null,
+    },
+  });
 }

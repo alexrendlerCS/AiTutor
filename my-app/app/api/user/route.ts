@@ -1,23 +1,25 @@
-import { cookies } from "next/headers"
-import { NextResponse } from "next/server"
-import jwt from "jsonwebtoken"
+// app/api/user/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
+import { cookies } from "next/headers";
 
-const JWT_SECRET = process.env.JWT_SECRET || "super-secret-key"
+export async function GET(req: NextRequest) {
+  const supabase = createServerComponentClient({ cookies: () => cookies() });
 
-export async function GET() {
-  const cookieStore = await cookies(); 
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
 
-  const token = cookieStore.get("token")?.value;
-
-  if (!token) {
+  if (error || !user) {
+    console.error("❌ User fetch failed:", error?.message || "No user found");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
-    return NextResponse.json({ userId: decoded.userId });
-  } catch (err) {
-    console.error("JWT verification failed:", err);
-    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
-  }
+  return NextResponse.json({
+    id: user.id,
+    email: user.email,
+    full_name: user.user_metadata?.full_name || "",
+    username: user.user_metadata?.username || "",
+  });
 }
