@@ -45,8 +45,8 @@ export async function POST(req: NextRequest) {
     const { error: progressError } = await supabase
       .from("user_progress")
       .upsert([
-        { user_id: userId, subject_id: 1, level: mathLevel, xp: 0 }, // math = 1
-        { user_id: userId, subject_id: 2, level: readingLevel, xp: 0 }, // reading = 2
+        { user_id: userId, subject_id: 1, level: mathLevel, xp: 0 }, // math
+        { user_id: userId, subject_id: 2, level: readingLevel, xp: 0 }, // reading
       ]);
 
     if (progressError) {

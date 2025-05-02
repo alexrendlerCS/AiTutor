@@ -86,8 +86,14 @@ export function ChatInterface({ subject, onSendMessage, userId, currentChallenge
       const res = await fetch("/api/ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject, messages: historyForAPI }),
-      })
+        body: JSON.stringify({
+          subject,
+          messages: historyForAPI,
+          challenge: !!currentChallengeId,
+          challengeId: currentChallengeId,
+        }),
+      });
+
   
       const data = await res.json()
       const assistantReply = data.reply
