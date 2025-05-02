@@ -152,31 +152,6 @@ export default function IntroQuizPage() {
     { level: 12, question: "Simplify: (x² + 3x + 2)/(x + 1)", answer: "x + 2" },
   ];
 
-
-  const [mathLevel, setMathLevel] = useState(2);
-  const [mathHistory, setMathHistory] = useState<{ correct: boolean }[]>([]);
-  const [currentMathQuestion, setCurrentMathQuestion] = useState(() =>
-    getQuestion("math", 2)
-  );
-
-  const [readingLevel, setReadingLevel] = useState(2);
-  const [readingHistory, setReadingHistory] = useState<{ correct: boolean }[]>(
-    []
-  );
-  const [currentReadingQuestion, setCurrentReadingQuestion] = useState(() =>
-    getQuestion("reading", 2)
-  );
-
-
-  function getQuestion(subject: "math" | "reading", level: number) {
-    const pool =
-      subject === "math"
-        ? mathQuestions.filter((q) => q.level === level)
-        : readingQuestions.filter((q) => q.level === level);
-    return pool[Math.floor(Math.random() * pool.length)];
-  }
-
-
   const readingQuestions = [
     // Kindergarten – Level 1
     {
@@ -413,6 +388,29 @@ export default function IntroQuizPage() {
     },
   ];
 
+  const [mathLevel, setMathLevel] = useState(2);
+  const [mathHistory, setMathHistory] = useState<{ correct: boolean }[]>([]);
+  const [currentMathQuestion, setCurrentMathQuestion] = useState(() =>
+    getQuestion("math", 2)
+  );
+
+  const [readingLevel, setReadingLevel] = useState(2);
+  const [readingHistory, setReadingHistory] = useState<{ correct: boolean }[]>(
+    []
+  );
+  const [currentReadingQuestion, setCurrentReadingQuestion] = useState(() =>
+    getQuestion("reading", 2)
+  );
+
+
+  function getQuestion(subject: "math" | "reading", level: number) {
+    const pool =
+      subject === "math"
+        ? mathQuestions.filter((q) => q.level === level)
+        : readingQuestions.filter((q) => q.level === level);
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
 
   const [userAnswer, setUserAnswer] = useState("");
 
@@ -479,18 +477,19 @@ export default function IntroQuizPage() {
       const correctCount = [...readingHistory, { correct: isCorrect }].filter(
         (h) => h.correct
       ).length;
-      setReadingScore((correctCount / 5) * 100);
+      const readingScoreFinal = (correctCount / 5) * 100;
+      setReadingScore(readingScoreFinal);
 
       setLoading(true);
-      // Inside handleReadingAnswer:
       const res = await fetch("/api/submit-quiz", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mathLevel,
-          readingLevel,
+          mathScore,
+          readingScore: readingScoreFinal, 
         }),
       });
+
 
       setLoading(false);
 
@@ -603,7 +602,7 @@ export default function IntroQuizPage() {
           >
             <h2 className="text-xl font-bold mb-4 text-center">Math Quiz</h2>
             <p className="mb-4 text-center">
-              {mathQuestions[currentMathQ].question}
+              {currentMathQuestion?.question ?? "Loading question..."}
             </p>
             <input
               type="text"

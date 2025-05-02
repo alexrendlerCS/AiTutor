@@ -95,36 +95,46 @@ export function ChatInterface({ subject, onSendMessage, userId, currentChallenge
       });
 
   
-      const data = await res.json()
-      const assistantReply = data.reply
-  
+      const data = await res.json();
+      const assistantReply = data.reply;
+
       // 7️⃣ update UI with real response
       setMessages((prev) =>
-        prev.filter((m) => m.id !== typingId).concat({
-          id: crypto.randomUUID(),
-          content: assistantReply,
-          sender: "assistant",
-        })
-      )
-  
-      const correct = isAnswerCorrect(assistantReply)
-  
-      const xpEarned =
-      correct && guessCount + 1 === 1 ? 10 :
-      correct && guessCount + 1 <= 2 ? 7 :
-      correct ? 5 : 1;
+        prev
+          .filter((m) => m.id !== typingId)
+          .concat({
+            id: crypto.randomUUID(),
+            content: assistantReply,
+            sender: "assistant",
+          })
+      );
 
-      window.dispatchEvent(
-        new CustomEvent("answer-attempt", {
-          detail: {
-            subject,
-            correct,
-            attempts: guessCount + 1,
-            xpEarned,
-            challengeId: currentChallengeId,
-          }
-        })
-      )
+      const correct = isAnswerCorrect(assistantReply);
+
+      const xpEarned =
+        correct && guessCount + 1 === 1
+          ? 10
+          : correct && guessCount + 1 <= 2
+          ? 7
+          : correct
+          ? 5
+          : 1;
+
+      // ✅ Dispatch XP update event — actual state update handled in learning-assistant
+            window.dispatchEvent(
+              new CustomEvent("answer-attempt", {
+                detail: {
+                  subject,
+                  correct,
+                  attempts: guessCount + 1,
+                  xpEarned,
+                  challengeId: currentChallengeId,
+                },
+              })
+            );
+
+
+
 
       
   

@@ -16,7 +16,6 @@ export async function hasUserAnsweredChallenge(
     });
 
     const data = await res.json();
-    console.log(`🔍 Challenge ${challengeId} for user ${userId} answered?`, data);
 
     return !!data.alreadyAnswered;
   } catch (error) {

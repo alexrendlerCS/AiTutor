@@ -1,10 +1,10 @@
-// app/api/user/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
+import { type NextRequest } from "next/server";
 
 export async function GET(req: NextRequest) {
-  const supabase = createServerComponentClient({ cookies: () => cookies() });
+  const supabase = createServerComponentClient({ cookies });
 
   const {
     data: { user },
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({
-    id: user.id,
+    userId: user.id,
     email: user.email,
     full_name: user.user_metadata?.full_name || "",
     username: user.user_metadata?.username || "",

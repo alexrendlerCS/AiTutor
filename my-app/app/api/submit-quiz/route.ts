@@ -42,24 +42,15 @@ export async function POST(req: NextRequest) {
     const readingLevel = determineLevel(readingScore);
     console.log("📊 Levels calculated:", { mathLevel, readingLevel });
 
-    const { error: progressError } = await supabase
-      .from("user_progress")
-      .upsert([
-        { user_id: userId, subject_id: 1, level: mathLevel, xp: 0 }, // math
-        { user_id: userId, subject_id: 2, level: readingLevel, xp: 0 }, // reading
-      ]);
-
-    if (progressError) {
-      console.log("💥 user_progress error:", progressError);
-      return NextResponse.json(
-        { error: progressError.message },
-        { status: 500 }
-      );
-    }
-
+    // 1. Update user_profiles with starting levels
     const { error: profileUpdateError } = await supabase
       .from("user_profiles")
-      .update({ completed_intro_quiz: true })
+      .update({
+        starting_math_level: mathLevel,
+        starting_reading_level: readingLevel,
+        started_intro_quiz: true,
+        completed_intro_quiz: true,
+      })
       .eq("user_id", userId);
 
     if (profileUpdateError) {
@@ -70,8 +61,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    console.log("✅ Intro quiz completed");
+    // 2. Upsert progress rows per subject
+    const { error: progressError } = await supabase
+      .from("user_progress")
+      .upsert(
+        [
+          { user_id: userId, subject_id: 1, level: mathLevel, xp: 0 },
+          { user_id: userId, subject_id: 2, level: readingLevel, xp: 0 },
+        ],
+        { onConflict: "user_id,subject_id" }
+      );
 
+    if (progressError) {
+      console.log("💥 user_progress error:", progressError);
+      return NextResponse.json(
+        { error: progressError.message },
+        { status: 500 }
+      );
+    }
+
+    console.log("✅ Intro quiz completed");
     return NextResponse.json({ message: "Intro quiz submitted successfully" });
   } catch (error: any) {
     console.error("🔥 Route crashed:", error.message || error);

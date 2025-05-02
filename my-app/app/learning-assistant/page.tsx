@@ -45,9 +45,14 @@ export default function LearningAssistant() {
     fetch("/api/user")
       .then((res) => res.json())
       .then((data) => {
-        setUserId(data.userId)
+        console.log("👤 Retrieved userId from /api/user:", data.userId);
+        setUserId(data.userId);
       })
-  }, [])
+      .catch((err) => {
+        console.error("❌ Failed to fetch userId:", err);
+      });
+  }, []);
+
 
 
   
@@ -63,35 +68,123 @@ export default function LearningAssistant() {
     handleActivity()
   }
 
-  useEffect(() => {
-    const handleAnswerAttempt = (e: Event) => {
-      const customEvent = e as CustomEvent<{
-        subject: Subject
-        correct: boolean
-        attempts: number
-      }>
-      const { subject, correct, attempts } = customEvent.detail
-  
-      let xpEarned = 2
-      if (correct && attempts === 1) xpEarned = 10
-      else if (correct && attempts <= 2) xpEarned = 7
-      else if (correct) xpEarned = 5
-      else xpEarned = 1
-  
-      setXpPoints((prev) => {
-        const newXp = prev + xpEarned
-        updateXpInDatabase(newXp)
-        return newXp
-      })
-  
-      console.log(`Answer attempt:`, { subject, correct, attempts, xpEarned })
+  const uploadXpToDatabase = async (newXp: number) => {
+    const subjectId = subjectMap[activeSubject];
+    if (!userId || !subjectId) {
+      console.warn("⚠️ Skipping XP upload — missing userId or subjectId");
+      return;
     }
+
+    const res = await fetch("/api/progress/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: userId,
+        subject: subjectId,
+        xp: newXp,
+      }),
+    });
+
+    const data = await res.json();
+    if (res.ok) {
+      console.log("✅ XP successfully updated in DB:", data);
+      window.dispatchEvent(new CustomEvent("xp-updated")); // only refetch after confirmed update
+    } else {
+      console.error("❌ Failed to update XP in DB:", data.error);
+    }
+  };
+
+  useEffect(() => {
+    const handleAnswerAttempt = async (e: Event) => {
+      const customEvent = e as CustomEvent<{
+        subject: Subject;
+        correct: boolean;
+        attempts: number;
+        xpEarned: number;
+        challengeId: number | null;
+      }>;
+
+      const { subject, xpEarned, challengeId, attempts, correct } =
+        customEvent.detail;
+
+      console.log("✅ XP Event Received", customEvent.detail);
+
+      // 🌟 Apply optimistic XP increase only if NOT a challenge
+      if (!challengeId) {
+        setXpPoints((prev) => {
+          const newXp = prev + xpEarned;
+          console.log("🌟 Optimistically updating XP to:", newXp);
+          uploadXpToDatabase(newXp); // ← this is only for prompts, not challenges
+          return newXp;
+        });
+      }
+
+      // 📝 Log challenge attempt — backend handles XP update there
+      if (challengeId && userId) {
+        try {
+          const res = await fetch("/api/xp/challenges/log", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user_id: userId,
+              challenge_id: challengeId,
+              success: correct,
+              attempts,
+              xp_earned: xpEarned,
+            }),
+          });
+
+          const result = await res.json();
+          console.log("📝 XP Log Result:", result);
+        } catch (err) {
+          console.error("❌ Failed to log XP in backend:", err);
+        }
+      }
+
+      // 🚀 Final trigger to refresh XP from DB
+      window.dispatchEvent(new CustomEvent("xp-updated"));
+    };
+
+    window.addEventListener("answer-attempt", handleAnswerAttempt);
+    return () =>
+      window.removeEventListener("answer-attempt", handleAnswerAttempt);
+  }, [userId]);
+
+
   
-    window.addEventListener("answer-attempt", handleAnswerAttempt)
-    return () => window.removeEventListener("answer-attempt", handleAnswerAttempt)
-  }, [activeSubject])
-  
-  
+  useEffect(() => {
+    const handleXpUpdated = async () => {
+      if (!userId) return;
+      const subjectId = subjectMap[activeSubject];
+      if (!subjectId) return;
+
+      // Wait briefly for backend to finalize write
+      await new Promise((r) => setTimeout(r, 300));
+
+      console.log("🔄 Refetching XP after challenge logging...");
+
+          const res = await fetch(
+            `/api/progress?user_id=${userId}&subject=${subjectId}`
+          );
+          const data = await res.json();
+
+          console.log(
+            "📬 Refetched XP from DB:",
+            data.xp,
+            "Level:",
+            data.level
+          );
+
+          setXpPoints(data.xp ?? 0);
+          setUserLevel(data.level ?? 1);
+
+    };
+
+    window.addEventListener("xp-updated", handleXpUpdated);
+    return () => window.removeEventListener("xp-updated", handleXpUpdated);
+  }, [userId, activeSubject]);
+
+
   
   // Handle focus mode timer
   useEffect(() => {
@@ -153,23 +246,6 @@ export default function LearningAssistant() {
       if (emotionalCheckTimerRef.current) clearInterval(emotionalCheckTimerRef.current)
     }
   }, [])
-
-  const updateXpInDatabase = async (newXp: number) => {
-    if (!userId) return
-    const subjectId = subjectMap[activeSubject]
-    if (!subjectId) return
-  
-    await fetch("/api/progress/update", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: userId,
-        subject: subjectId,
-        xp: newXp,
-      }),
-    })
-  }
-  
   
   const handleEmotionSelected = (selectedEmotion: Emotion) => {
     setEmotion(selectedEmotion)
@@ -180,14 +256,25 @@ export default function LearningAssistant() {
     // 2️⃣ whenever we have both userId & activeSubject, fetch XP+level:
     useEffect(() => {
       const loadProgress = async () => {
-        if (!userId) return
+        if (!userId) {
+          console.warn("⚠️ Skipping loadProgress — no userId");
+          return;
+        }
         const subjectId = subjectMap[activeSubject]
-        if (!subjectId) return
-  
+         if (!subjectId) {
+           console.warn(
+             "⚠️ Skipping loadProgress — invalid subjectId for:",
+             activeSubject
+           );
+           return;
+         }
+        console.log(`📦 Loading progress for user: ${userId}, subject: ${activeSubject} (id: ${subjectId})`);
+
         const res = await fetch(`/api/progress?user_id=${userId}&subject=${subjectId}`)
         const data = await res.json()
         setXpPoints(data.xp    ?? 0)
         setUserLevel(data.level ?? 1)      // ← populate level
+        console.log("📈 Progress data received:", data);
       }
   
       loadProgress()

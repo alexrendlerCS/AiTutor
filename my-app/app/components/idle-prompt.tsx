@@ -102,9 +102,7 @@ export function IdlePrompt({
         // ✅ Check which challenges are already answered by the user
         const answeredIds = await Promise.all(
           list.map(async (c) => {
-            console.log("✅ Loaded challenges:", list.map(c => c.id));
             const answered = await hasUserAnsweredChallenge(userId, c.id);
-            console.log("Answered?", answered);
             return answered ? c.id : null;
           })
         );
