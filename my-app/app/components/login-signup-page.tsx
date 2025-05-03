@@ -82,6 +82,14 @@ export default function LoginSignupPage() {
         return router.push("/intro-quiz");
       }
 
+      // ✅ Insert into your custom 'users' table if not exists
+      await supabase.from("users").upsert({
+        id: user.id,
+        email: user.email,
+        full_name: user.user_metadata?.full_name ?? "",
+        username: user.user_metadata?.username ?? "",
+      });
+
       // ✅ Check profile completion status
       const profileRes = await fetch("/api/profile/status");
       const profileData = await profileRes.json();

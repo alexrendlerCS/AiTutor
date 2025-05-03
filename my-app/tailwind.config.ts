@@ -1,7 +1,7 @@
 import type { Config } from "tailwindcss"
 
 const config: Config = {
-  darkMode: ["class"],
+  darkMode: ["class", "dark"],
   content: [
     "./pages/**/*.{ts,tsx}",
     "./components/**/*.{ts,tsx}",
@@ -82,7 +82,11 @@ const config: Config = {
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      fontFamily: {
+        sans: ["Nunito", "system-ui", "sans-serif"],
+      },
       keyframes: {
+        // Existing keyframes...
         "accordion-down": {
           from: { height: "0" },
           to: { height: "var(--radix-accordion-content-height)" },
@@ -91,17 +95,22 @@ const config: Config = {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" },
         },
+        // ✅ New fade-in keyframe
+        "fade-in": {
+          "0%": { opacity: "0", transform: "scale(0.95)" },
+          "100%": { opacity: "1", transform: "scale(1)" },
+        },
       },
       animation: {
+        // Existing animations...
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
-      },
-      fontFamily: {
-        sans: ["Nunito", "system-ui", "sans-serif"],
+        // ✅ New fade-in animation
+        "fade-in": "fade-in 0.4s ease-out forwards",
       },
     },
   },
   plugins: [require("tailwindcss-animate")],
-}
+};
 
 export default config

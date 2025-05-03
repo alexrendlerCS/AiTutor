@@ -1,4 +1,3 @@
-// my-app/app/api/xp/challenges/log/route.ts
 import { NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
@@ -10,7 +9,20 @@ export async function POST(req: Request) {
 
   const supabase = createRouteHandlerClient({ cookies });
 
-  // 1. Insert challenge attempt
+  // 🔍 Check if already logged
+  const { data: existing, error: fetchAttemptError } = await supabase
+    .from("user_challenge_attempts")
+    .select("id")
+    .eq("user_id", user_id)
+    .eq("challenge_id", challenge_id)
+    .maybeSingle();
+
+  if (existing) {
+    console.log("⚠️ Challenge already logged. Skipping insert.");
+    return NextResponse.json({ message: "Already logged" }, { status: 200 });
+  }
+
+  // ✅ Insert challenge attempt
   const { error: insertError } = await supabase
     .from("user_challenge_attempts")
     .insert([
@@ -29,7 +41,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: insertError.message }, { status: 500 });
   }
 
-  // ✅ 2. Fetch subject_id from challenge
+  // 🧠 Fetch subject_id for XP increment
   const { data: challengeInfo, error: fetchError } = await supabase
     .from("challenges")
     .select("subject_id")
@@ -49,27 +61,18 @@ export async function POST(req: Request) {
 
   const subject_id = challengeInfo.subject_id;
 
+  // 🎯 Increment XP
   const { error: updateError } = await supabase.rpc("increment_user_xp", {
     xp_to_add: xp_earned,
     user_id_param: user_id,
     subject_id_param: subject_id,
   });
 
-  console.log("✅ XP increment RPC triggered for:", {
-    user_id,
-    subject_id,
-    xp_earned,
-  });
-
   if (updateError) {
     console.error("❌ Failed to update XP:", updateError.message);
     return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
-  
-  console.log(
-    "✅ Full challenge log + XP update complete for challenge:",
-    challenge_id
-  );
 
+  console.log("✅ Challenge logged and XP updated:", { user_id, challenge_id });
   return NextResponse.json({ success: true });
 }

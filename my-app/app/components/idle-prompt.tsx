@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import { ChevronDown, Lightbulb } from "lucide-react";
 import type { Subject } from "../learning-assistant/page";
 import { logChallengeAttempt } from "../lib/logChallengeAttempt";
-import { hasUserAnsweredChallenge } from "../lib/hasUserAnsweredChallenge";
+import { fetchActiveChallenge } from "../lib/fetchActiveChallenge";
 import { createPagesBrowserClient } from "@supabase/auth-helpers-nextjs";
 
 interface ChallengeBoxProps {
@@ -14,20 +14,13 @@ interface ChallengeBoxProps {
   userId: string;
   initialXP: number;
   onEarnXp: (xp: number) => void;
-  onPromptClick: (prompt: string, challengeId: number) => void; 
+  onPromptClick: (prompt: string, challengeId: number) => void;
 }
-
 
 interface Challenge {
   id: number;
   prompt: string;
   difficulty: number;
-}
-
-function getDifficultyRangeForLevel(level: number): { min: number; max: number } {
-  if (level < 10) return { min: 1, max: 3 };
-  if (level < 20) return { min: 4, max: 6 };
-  return { min: 7, max: 9 };
 }
 
 export function IdlePrompt({
@@ -38,19 +31,18 @@ export function IdlePrompt({
   onEarnXp,
   onPromptClick,
 }: ChallengeBoxProps) {
-  const [challenges, setChallenges] = useState<Challenge[]>([]);
-  const [answeredChallengeIds, setAnsweredChallengeIds] = useState<number[]>([]);
-  const [currentXP, setCurrentXP] = useState(initialXP); // ✅ use initialXP
+  const [challenge, setChallenge] = useState<Challenge | null>(null);
+  const [currentXP, setCurrentXP] = useState(initialXP);
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const supabase = useRef(createPagesBrowserClient()).current;
+  const [showUnlockedMessage, setShowUnlockedMessage] = useState(false);
 
-  // ✅ update XP if parent changes it
   useEffect(() => {
     setCurrentXP(initialXP);
   }, [initialXP]);
-  
+
   const updateXpInDatabase = async (newXp: number) => {
     const subjectMap: Record<Subject, number> = {
       math: 1,
@@ -71,107 +63,61 @@ export function IdlePrompt({
   };
 
   useEffect(() => {
-    const subjectMap: Record<Subject, number> = {
-      math: 1,
-      reading: 2,
-      spelling: 3,
-      exploration: 4,
-    };
-  
-    async function fetchChallenges() {
-      if (!userId) {
-        console.warn("🛑 Skipping fetchChallenges — no userId yet.");
-        return;
-      }
-  
+    async function loadExistingChallenge() {
       setIsLoading(true);
-  
       try {
-        const subjId = subjectMap[subject];
-        const { min, max } = getDifficultyRangeForLevel(level);
-  
-        const res = await fetch(
-          `/api/xp/challenges?subject_id=${subjId}&min_difficulty=${min}&max_difficulty=${max}`
-        )        
-  
-        if (!res.ok) throw new Error(`Failed to fetch challenges: HTTP ${res.status}`);
-  
-        const list: Challenge[] = await res.json();
-        setChallenges(list);
-  
-        // ✅ Check which challenges are already answered by the user
-        const answeredIds = await Promise.all(
-          list.map(async (c) => {
-            const answered = await hasUserAnsweredChallenge(userId, c.id);
-            return answered ? c.id : null;
-          })
-        );
-        
-  
-        setAnsweredChallengeIds(answeredIds.filter((id): id is number => id !== null));
+        const res = await fetch("/api/xp/challenges/current", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subject }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          setChallenge(data.challenge ?? null);
+        } else {
+          console.error("❌ Failed to load existing challenge:", res.status);
+          setChallenge(null);
+        }
       } catch (err) {
-        console.error("❌ Error loading challenges:", err);
-        setChallenges([]);
+        console.error("❌ Error loading challenge:", err);
+        setChallenge(null);
       } finally {
         setIsLoading(false);
       }
     }
-  
-    fetchChallenges();
-  }, [subject, level, userId]);
-  
+
+    loadExistingChallenge();
+  }, [subject]);
+
+
   useEffect(() => {
-    const handleExternalAnswerAttempt = (e: Event) => {
-      const customEvent = e as CustomEvent<{
-        challengeId: number
-        correct: boolean
-      }>
-  
-      const { challengeId, correct } = customEvent.detail
-  
-      if (correct && !answeredChallengeIds.includes(challengeId)) {
-        setAnsweredChallengeIds((prev) => [...prev, challengeId])
+    const handleChallengeComplete = async () => {
+      const latest = await fetchActiveChallenge(subject);
+      if (latest) {
+        setChallenge(latest);
+        setShowUnlockedMessage(true);
+        setTimeout(() => setShowUnlockedMessage(false), 3000);
       }
-    }
-  
-    window.addEventListener("answer-attempt", handleExternalAnswerAttempt)
-  
+    };
+    console.log(
+      "🎯 challenge-complete event received — fetching new challenge..."
+    );
+
+    window.addEventListener("challenge-complete", handleChallengeComplete);
     return () => {
-      window.removeEventListener("answer-attempt", handleExternalAnswerAttempt)
-    }
-  }, [answeredChallengeIds])
-  
+      window.removeEventListener("challenge-complete", handleChallengeComplete);
+    };
+  }, [subject]);
+
   const handleClick = async (c: Challenge) => {
-    const alreadyAnswered = answeredChallengeIds.includes(c.id);
-    if (alreadyAnswered) {
-      alert("You've already answered this question! Wait for new ones tomorrow.");
-      return;
-    }
-  
-    onPromptClick(c.prompt, c.id); // ✅ pass both prompt + ID
-  
-    const xpReward = c.difficulty * 10;
-    const newXp = currentXP + xpReward;
-    setCurrentXP(newXp);
-    await updateXpInDatabase(newXp);
-    onEarnXp(xpReward);
-  
-    try {
-      await logChallengeAttempt({
-        user_id: userId,
-        challenge_id: c.id,
-        success: true,
-        attempts: 1,
-        used_hint: false,
-        xp_earned: xpReward,
-      });
-  
-      setAnsweredChallengeIds((prev) => [...prev, c.id]);
-    } catch (err) {
-      console.error("❌ logChallengeAttempt failed:", err);
-    }
-  };  
-  
+    // Optional: prevent re-clicking rapidly
+    if (!c) return;
+
+    // 🔄 Send the challenge to the AI assistant for evaluation
+    onPromptClick(c.prompt, c.id);
+  };
+
   return (
     <details
       ref={detailsRef}
@@ -183,34 +129,33 @@ export function IdlePrompt({
           <Lightbulb className="w-5 h-5 text-yellow-500" />
           Challenge Questions (level {level})
         </div>
-        <ChevronDown className={`w-5 h-5 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+        <ChevronDown
+          className={`w-5 h-5 transition-transform ${
+            isOpen ? "rotate-180" : ""
+          }`}
+        />
       </summary>
+      {showUnlockedMessage && (
+        <div className="mb-3 text-green-700 font-semibold text-center animate-fade-in">
+          🎉 New Challenge Unlocked!
+        </div>
+      )}
 
       <ul className="space-y-2">
         {isLoading ? (
-          <li className="text-gray-500 italic">Loading challenges…</li>
-        ) : challenges.length === 0 ? (
-          <li className="text-gray-500 italic">No challenges available.</li>
+          <p className="text-gray-500 italic">Loading challenge…</p>
+        ) : challenge ? (
+          <div
+            className="p-3 rounded-md cursor-pointer hover:bg-yellow-100 transition"
+            onClick={() => handleClick(challenge)}
+          >
+            {challenge.prompt}
+            <span className="text-sm text-yellow-700 ml-2">
+              +{challenge.difficulty * 10} XP
+            </span>
+          </div>
         ) : (
-          challenges.map((c) => {
-            const isAnswered = answeredChallengeIds.includes(c.id);
-            return (
-              <li
-                key={c.id}
-                onClick={() => handleClick(c)}
-                className={`p-2 rounded-md transition-all ${
-                  isAnswered
-                    ? "opacity-50 line-through cursor-not-allowed"
-                    : "cursor-pointer hover:bg-yellow-100"
-                }`}
-              >
-                {c.prompt}
-                <span className="text-sm text-yellow-700 ml-2">
-                  +{c.difficulty * 10} XP
-                </span>
-              </li>
-            );
-          })
+          <p className="text-gray-500 italic">No challenge available.</p>
         )}
       </ul>
 

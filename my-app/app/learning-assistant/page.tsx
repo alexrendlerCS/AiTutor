@@ -85,6 +85,7 @@ export default function LearningAssistant() {
       }),
     });
 
+    
     const data = await res.json();
     if (res.ok) {
       console.log("✅ XP successfully updated in DB:", data);
@@ -136,6 +137,18 @@ export default function LearningAssistant() {
 
           const result = await res.json();
           console.log("📝 XP Log Result:", result);
+
+          if (correct) {
+            // 👇 Generate a new challenge after correct answer
+            await fetch("/api/xp/challenges/generate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ subject }),
+            });
+
+            // ✅ Notify IdlePrompt to reload
+            window.dispatchEvent(new CustomEvent("challenge-complete"));
+          }
         } catch (err) {
           console.error("❌ Failed to log XP in backend:", err);
         }
@@ -150,8 +163,6 @@ export default function LearningAssistant() {
       window.removeEventListener("answer-attempt", handleAnswerAttempt);
   }, [userId]);
 
-
-  
   useEffect(() => {
     const handleXpUpdated = async () => {
       if (!userId) return;

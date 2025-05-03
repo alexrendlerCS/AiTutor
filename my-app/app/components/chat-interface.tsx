@@ -9,7 +9,6 @@ type OpenAIMessage = { role: "user" | "assistant"; content: string };
 import { cn } from "../lib/utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip"
 import { formatAIResponse } from "../utils/formatAIResponse"
-import { logChallengeAttempt } from "../lib/logChallengeAttempt";
 
 
 interface Message {
@@ -94,7 +93,6 @@ export function ChatInterface({ subject, onSendMessage, userId, currentChallenge
         }),
       });
 
-  
       const data = await res.json();
       const assistantReply = data.reply;
 
@@ -120,51 +118,27 @@ export function ChatInterface({ subject, onSendMessage, userId, currentChallenge
           ? 5
           : 1;
 
-      // ✅ Dispatch XP update event — actual state update handled in learning-assistant
-            window.dispatchEvent(
-              new CustomEvent("answer-attempt", {
-                detail: {
-                  subject,
-                  correct,
-                  attempts: guessCount + 1,
-                  xpEarned,
-                  challengeId: currentChallengeId,
-                },
-              })
-            );
-
-
-
-
-      
-  
-      // 8️⃣ ⬇️ Try logging attempt if correct
-      if (correct) {
-        // This part should be dynamic — placeholder logic for now
-        const possibleChallenge = messages.find((m) =>
-          /(\d+)\s*×\s*(\d+)/.test(m.content)
-        )
-  
-        // You’ll want to pass challenge ID from <IdlePrompt /> in a real scenario
-        const challengeId = currentChallengeId
-
-  
-        if (challengeId && typeof window !== "undefined") {
-          try {
-            await logChallengeAttempt({
-              user_id: userId, // make sure userId is accessible here!
-              challenge_id: challengeId,
-              success: true,
+      // Only process XP/challenge logic if this was a challenge
+      if (currentChallengeId) {
+        // ✅ Dispatch XP event — LearningAssistant handles backend + XP update
+        window.dispatchEvent(
+          new CustomEvent("answer-attempt", {
+            detail: {
+              subject,
+              correct,
               attempts: guessCount + 1,
-              xp_earned:
-                guessCount + 1 === 1 ? 10 : guessCount + 1 <= 2 ? 7 : 5,
-            })
-          } catch (err) {
-            console.error("❌ Failed to log challenge attempt:", err)
-          }
+              xpEarned,
+              challengeId: currentChallengeId,
+            },
+          })
+        );
+
+        // Reset guesses for next challenge
+        if (correct) setGuessCount(0);
+        if (correct && currentChallengeId) {
+          window.dispatchEvent(new CustomEvent("challenge-complete"));
         }
-  
-        setGuessCount(0)
+
       }
     } catch (err) {
       console.error("❌ AI response error:", err)
