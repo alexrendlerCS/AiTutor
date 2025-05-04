@@ -207,7 +207,10 @@ Now generate the next challenge:
     )
     .select()
     .single();
-
+  console.log(
+    `✅ Generated ${subject} challenge for user ${user.id}:`,
+    newPrompt
+  );
   if (upsertError) {
     console.error("❌ Error storing challenge:", upsertError);
     return NextResponse.json(

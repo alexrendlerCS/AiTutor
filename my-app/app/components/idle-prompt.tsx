@@ -74,7 +74,31 @@ export function IdlePrompt({
 
         if (res.ok) {
           const data = await res.json();
-          setChallenge(data.challenge ?? null);
+
+          if (data.challenge) {
+            setChallenge(data.challenge);
+          } else {
+            console.log(
+              "⚠️ No challenge found. Generating one for subject:",
+              subject
+            );
+            const genRes = await fetch("/api/xp/challenges/generate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ subject }),
+            });
+
+            if (genRes.ok) {
+              const { challenge: generated } = await genRes.json();
+              setChallenge(generated ?? null);
+            } else {
+              console.error(
+                "❌ Failed to generate challenge:",
+                await genRes.text()
+              );
+              setChallenge(null);
+            }
+          }
         } else {
           console.error("❌ Failed to load existing challenge:", res.status);
           setChallenge(null);
