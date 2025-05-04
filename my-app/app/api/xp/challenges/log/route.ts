@@ -1,3 +1,4 @@
+// app/api/xp/challenges/log/route.ts
 import { NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
@@ -7,72 +8,86 @@ export async function POST(req: Request) {
   const { user_id, challenge_id, success, attempts, used_hint, xp_earned } =
     body;
 
-  const supabase = createRouteHandlerClient({ cookies });
+  const cookieStore = cookies(); // ✅ Correct way for route handlers
+  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
 
-  // 🔍 Check if already logged
-  const { data: existing, error: fetchAttemptError } = await supabase
-    .from("user_challenge_attempts")
-    .select("id")
-    .eq("user_id", user_id)
-    .eq("challenge_id", challenge_id)
-    .maybeSingle();
 
-  if (existing) {
-    console.log("⚠️ Challenge already logged. Skipping insert.");
-    return NextResponse.json({ message: "Already logged" }, { status: 200 });
-  }
+  try {
+    // 🧠 Fetch subject_id for XP logic
+    const { data: challengeInfo, error: fetchError } = await supabase
+      .from("active_challenges")
+      .select("subject_id")
+      .eq("id", challenge_id)
+      .single();
 
-  // ✅ Insert challenge attempt
-  const { error: insertError } = await supabase
-    .from("user_challenge_attempts")
-    .insert([
-      {
-        user_id,
-        challenge_id,
-        success,
-        attempts,
-        used_hint,
-        xp_earned,
-      },
-    ]);
+    if (fetchError || !challengeInfo) {
+      console.error(
+        "❌ Failed to fetch challenge subject:",
+        fetchError?.message
+      );
+      return NextResponse.json(
+        { error: "Could not get challenge subject" },
+        { status: 500 }
+      );
+    }
 
-  if (insertError) {
-    console.error("❌ Failed to log challenge:", insertError.message);
-    return NextResponse.json({ error: insertError.message }, { status: 500 });
-  }
+    const subject_id = challengeInfo.subject_id;
 
-  // 🧠 Fetch subject_id for XP increment
-  const { data: challengeInfo, error: fetchError } = await supabase
-    .from("challenges")
-    .select("subject_id")
-    .eq("id", challenge_id)
-    .single();
+    // 🔍 Attempt upsert — safely handle unique constraint
+    const { error: upsertError } = await supabase
+      .from("user_challenge_attempts")
+      .upsert(
+        [
+          {
+            user_id,
+            challenge_id,
+            success,
+            attempts,
+            used_hint,
+            xp_earned,
+          },
+        ],
+        { onConflict: "user_id,challenge_id" }
+      );
 
-  if (fetchError || !challengeInfo) {
-    console.error(
-      "❌ Failed to fetch challenge's subject_id:",
-      fetchError?.message
-    );
+    if (upsertError) {
+      if (upsertError.code === "23505") {
+        console.log("⚠️ Duplicate challenge attempt — skipping XP.");
+        return NextResponse.json(
+          { message: "Already logged" },
+          { status: 200 }
+        );
+      }
+      console.error("❌ Upsert error:", upsertError.message);
+      return NextResponse.json({ error: upsertError.message }, { status: 500 });
+    }
+
+    // 🎯 Only increment XP if the current attempt was successful
+    if (success) {
+      const { error: updateError } = await supabase.rpc("increment_user_xp", {
+        xp_to_add: xp_earned,
+        user_id_param: user_id,
+        subject_id_param: subject_id,
+      });
+
+      if (updateError) {
+        console.error("❌ Failed to update XP:", updateError.message);
+        return NextResponse.json(
+          { error: updateError.message },
+          { status: 500 }
+        );
+      }
+
+      console.log("✅ XP updated via RPC for successful challenge.");
+    }
+
+    console.log("✅ Challenge logged:", { user_id, challenge_id });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error("❌ Unexpected error:", err);
     return NextResponse.json(
-      { error: "Could not get challenge subject" },
+      { error: "Unexpected server error" },
       { status: 500 }
     );
   }
-
-  const subject_id = challengeInfo.subject_id;
-
-  // 🎯 Increment XP
-  const { error: updateError } = await supabase.rpc("increment_user_xp", {
-    xp_to_add: xp_earned,
-    user_id_param: user_id,
-    subject_id_param: subject_id,
-  });
-
-  if (updateError) {
-    console.error("❌ Failed to update XP:", updateError.message);
-    return NextResponse.json({ error: updateError.message }, { status: 500 });
-  }
-
-  console.log("✅ Challenge logged and XP updated:", { user_id, challenge_id });
-  return NextResponse.json({ success: true });
 }

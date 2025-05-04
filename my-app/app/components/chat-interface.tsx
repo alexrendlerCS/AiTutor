@@ -9,7 +9,7 @@ type OpenAIMessage = { role: "user" | "assistant"; content: string };
 import { cn } from "../lib/utils"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip"
 import { formatAIResponse } from "../utils/formatAIResponse"
-
+import { toast } from "sonner"; 
 
 interface Message {
   id: string
@@ -43,44 +43,41 @@ export function ChatInterface({ subject, onSendMessage, userId, currentChallenge
   const isAnswerCorrect = (assistantMessage: string): boolean =>
     assistantMessage.trim().startsWith("Correct!");
 
-  
-
   const handleSend = async () => {
-    if (!inputValue.trim()) return
-  
-    // 1️⃣ create the new user message
+    if (!inputValue.trim()) return;
+
     const userMessage: Message = {
       id: Date.now().toString(),
       content: inputValue,
       sender: "user",
-    }
-  
-    // 2️⃣ build updated list
-    const beforeTyping = [...messages, userMessage]
-  
-    // 3️⃣ show user message
-    setMessages(beforeTyping)
-    setGuessCount((prev) => prev + 1)
-    onSendMessage(inputValue)
-    setInputValue("")
-  
-    // 4️⃣ insert typing bubble
-    const typingId = "typing"
+    };
+
+    const beforeTyping = [...messages, userMessage];
+
+    setMessages(beforeTyping);
+    setGuessCount((prev) => prev + 1);
+    onSendMessage(inputValue);
+    setInputValue("");
+
+    const typingId = "typing";
     const withTyping = beforeTyping
       .filter((m) => m.id !== typingId)
-      .concat({ id: typingId, content: "", sender: "assistant", isTyping: true })
-    setMessages(withTyping)
-  
-    // 5️⃣ build message history for API
+      .concat({
+        id: typingId,
+        content: "",
+        sender: "assistant",
+        isTyping: true,
+      });
+    setMessages(withTyping);
+
     const historyForAPI: OpenAIMessage[] = beforeTyping
       .filter((m) => m.sender === "user" || m.sender === "assistant")
       .map((m) => ({
         role: m.sender as "user" | "assistant",
         content: m.content,
       }))
-      .concat({ role: "user", content: inputValue })
-  
-    // 6️⃣ send to AI backend
+      .concat({ role: "user", content: inputValue });
+
     try {
       const res = await fetch("/api/ai", {
         method: "POST",
@@ -96,7 +93,6 @@ export function ChatInterface({ subject, onSendMessage, userId, currentChallenge
       const data = await res.json();
       const assistantReply = data.reply;
 
-      // 7️⃣ update UI with real response
       setMessages((prev) =>
         prev
           .filter((m) => m.id !== typingId)
@@ -108,51 +104,54 @@ export function ChatInterface({ subject, onSendMessage, userId, currentChallenge
       );
 
       const correct = isAnswerCorrect(assistantReply);
+      const attempts = guessCount + 1;
 
       const xpEarned =
-        correct && guessCount + 1 === 1
+        correct && attempts === 1
           ? 10
-          : correct && guessCount + 1 <= 2
+          : correct && attempts <= 2
           ? 7
           : correct
           ? 5
-          : 1;
+          : 1; // <- always awards at least 1 XP
 
-      // Only process XP/challenge logic if this was a challenge
-      if (currentChallengeId) {
-        // ✅ Dispatch XP event — LearningAssistant handles backend + XP update
-        window.dispatchEvent(
-          new CustomEvent("answer-attempt", {
-            detail: {
-              subject,
-              correct,
-              attempts: guessCount + 1,
-              xpEarned,
-              challengeId: currentChallengeId,
-            },
-          })
-        );
+      // ✅ Dispatch XP event regardless of correctness
+      window.dispatchEvent(
+        new CustomEvent("answer-attempt", {
+          detail: {
+            subject,
+            correct,
+            attempts,
+            xpEarned,
+            challengeId: currentChallengeId, // can be null
+          },
+        })
+      );
 
-        // Reset guesses for next challenge
-        if (correct) setGuessCount(0);
-        if (correct && currentChallengeId) {
-          window.dispatchEvent(new CustomEvent("challenge-complete"));
-        }
+      // ✅ Trigger challenge-complete only if correct AND challenge
+      if (correct && currentChallengeId) {
+        window.dispatchEvent(new CustomEvent("challenge-complete"));
+        setGuessCount(0); // reset guesses
+      }
 
+      // ✅ Show toast for XP regardless of correctness
+      if (!currentChallengeId) {
+        toast.success(`+${xpEarned} XP`, { duration: 2000 });
       }
     } catch (err) {
-      console.error("❌ AI response error:", err)
+      console.error("❌ AI response error:", err);
       setMessages((prev) =>
-        prev.filter((m) => m.id !== typingId).concat({
-          id: crypto.randomUUID(),
-          content:
-            "Hmm... I'm having trouble responding right now. Try again in a moment!",
-          sender: "assistant",
-        })
-      )
+        prev
+          .filter((m) => m.id !== typingId)
+          .concat({
+            id: crypto.randomUUID(),
+            content:
+              "Hmm... I'm having trouble responding right now. Try again in a moment!",
+            sender: "assistant",
+          })
+      );
     }
-  }
-  
+  };
 
   useEffect(() => {
     setMessages((prev) => [
