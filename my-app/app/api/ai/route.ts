@@ -26,11 +26,13 @@ export async function POST(req: NextRequest) {
     const { subject, message, messages, challenge, challengeId, attempts } =
       body;
 
-    // 🔁 Map subject names to IDs
     const subjectMap: Record<string, number> = {
       math: 1,
       reading: 2,
+      spelling: 3,
+      exploration: 4,
     };
+
     const subjectId = subjectMap[subject.toLowerCase()] ?? -1;
 
     // 🔍 Fetch user profile
@@ -150,12 +152,21 @@ export async function POST(req: NextRequest) {
 
     console.log("🧠 Final System Prompt:", systemPrompt);
 
+    const baseMessages = [
+      {
+        role: "system",
+        content: systemPrompt,
+      },
+    ];
+
+
     const chatMessages = Array.isArray(messages)
-      ? [{ role: "system", content: systemPrompt }, ...messages]
-      : [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: message },
-        ];
+      ? [...baseMessages, ...messages]
+      : [...baseMessages, { role: "user", content: message }];
+
+    if (chatMessages.length >= 6) {
+      chatMessages.unshift({ role: "assistant", content: systemPrompt });
+    }
 
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -179,7 +190,54 @@ export async function POST(req: NextRequest) {
     }
 
     const data = await res.json();
-    return NextResponse.json({ reply: data.choices[0].message.content });
+    const rawReply = data.choices[0].message.content;
+
+    // ⛔ Detect if GPT leaks an answer too early (e.g., "4 x 5 = 20")
+    const answerLeakPattern =
+      /\b\d+\s*[\+\-\*/x×]\s*\d+\s*=\s*\d+\b|(?:the\s+)?(?:answer|result)\s+(?:is|equals|comes\s+out\s+to|gives\s+you)\s+\d+/i;
+
+
+    if (attempts < 3 && answerLeakPattern.test(rawReply)) {
+      console.warn(
+        "❌ Detected leaked answer on low attempts. Regenerating..."
+      );
+
+      chatMessages.push({
+        role: "user",
+        content:
+          "Oops! Try again, but remember not to reveal the final answer or equation just yet.",
+      });
+
+      const retryRes = await fetch(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          },
+          body: JSON.stringify({
+            model: "gpt-4o",
+            messages: chatMessages,
+            temperature: 0.7,
+          }),
+        }
+      );
+
+      if (!retryRes.ok) {
+        const err = await retryRes.json();
+        console.error("Retry API error:", err);
+        return NextResponse.json({
+          reply: "Hmm... still having trouble responding right now.",
+        });
+      }
+
+      const retryData = await retryRes.json();
+      return NextResponse.json({ reply: retryData.choices[0].message.content });
+    }
+
+    return NextResponse.json({ reply: rawReply });
+
   } catch (error) {
     console.error("Server error:", error);
     return NextResponse.json({

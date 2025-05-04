@@ -16,7 +16,7 @@ export async function POST(req: Request) {
     // 🧠 Fetch subject_id for XP logic
     const { data: challengeInfo, error: fetchError } = await supabase
       .from("active_challenges")
-      .select("subject_id")
+      .select("subject_id, prompt_type") 
       .eq("id", challenge_id)
       .single();
 
@@ -31,7 +31,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const subject_id = challengeInfo.subject_id;
+    const { subject_id, prompt_type } = challengeInfo;
 
     // 🔍 Attempt upsert — safely handle unique constraint
     const { error: upsertError } = await supabase
@@ -45,6 +45,7 @@ export async function POST(req: Request) {
             attempts,
             used_hint,
             xp_earned,
+            prompt_type,
           },
         ],
         { onConflict: "user_id,challenge_id" }
