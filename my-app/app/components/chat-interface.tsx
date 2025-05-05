@@ -41,7 +41,8 @@ export function ChatInterface({ subject, onSendMessage, userId, currentChallenge
   const [guessCount, setGuessCount] = useState(0)
 
   const isAnswerCorrect = (assistantMessage: string): boolean =>
-    assistantMessage.trim().startsWith("Correct!");
+    assistantMessage.toLowerCase().includes("Correct!");
+
 
   const handleSend = async () => {
     if (!inputValue.trim()) return;
@@ -243,6 +244,24 @@ export function ChatInterface({ subject, onSendMessage, userId, currentChallenge
       window.removeEventListener("ai-message", handleExternalSend)
     }
   }, [messages, subject])
+
+  useEffect(() => {
+    const resetState = () => {
+      setMessages([
+        {
+          id: "welcome-" + subject,
+          content: getWelcomeMessage(subject),
+          sender: "assistant",
+        },
+      ]);
+      setGuessCount(0);
+    };
+
+    window.addEventListener("reset-attempts", resetState);
+    return () => {
+      window.removeEventListener("reset-attempts", resetState);
+    };
+  }, [subject]);
 
   const handleVoiceInput = () => {
     setIsListening(!isListening)

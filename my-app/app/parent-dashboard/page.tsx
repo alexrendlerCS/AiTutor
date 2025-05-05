@@ -31,6 +31,28 @@ type SubjectAttempts = {
   attempts: number;
 };
 
+function FreeformXpChart({
+  data,
+}: {
+  data: { subject: string; xp: number }[];
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={300}>
+      <BarChartComponent
+        data={data}
+        layout="vertical"
+        margin={{ top: 10, right: 30, left: 50, bottom: 10 }}
+      >
+        <CartesianGrid strokeDasharray="3 3" />
+        <XAxis type="number" />
+        <YAxis dataKey="subject" type="category" />
+        <Tooltip />
+        <Bar dataKey="xp" fill="#f59e0b" />
+      </BarChartComponent>
+    </ResponsiveContainer>
+  );
+}
+
 function SubjectStrengthChart({ data }: { data: SubjectPerformance[] }) {
   return (
     <ResponsiveContainer width="100%" height={300}>
@@ -146,6 +168,46 @@ export default function ParentDashboard() {
    const [attemptVolumeData, setAttemptVolumeData] = useState<
      SubjectAttempts[]
    >([]);
+   const [freeformXpData, setFreeformXpData] = useState<
+     { subject: string; xp: number }[]
+   >([]);
+
+   useEffect(() => {
+     const fetchFreeformXp = async () => {
+       const supabase = createClientComponentClient();
+       const {
+         data: { session },
+       } = await supabase.auth.getSession();
+
+       const userId = session?.user?.id;
+       if (!userId) return;
+
+       const { data, error } = await supabase
+         .from("user_prompt_attempts")
+         .select("subject_id, xp_earned")
+         .eq("user_id", userId);
+
+       if (error) {
+         console.error("❌ Failed to fetch freeform XP:", error);
+         return;
+       }
+
+       const totals: Record<string, number> = {};
+       data.forEach((entry) => {
+         const subject = subjectMap[entry.subject_id] || "Unknown";
+         totals[subject] =
+           (totals[subject] || 0) + (Number(entry.xp_earned) || 0);
+       });
+
+       const result = Object.entries(totals).map(([subject, xp]) => ({
+         subject,
+         xp,
+       }));
+       setFreeformXpData(result);
+     };
+
+     fetchFreeformXp();
+   }, []);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -385,6 +447,15 @@ export default function ParentDashboard() {
           </CardHeader>
           <CardContent>
             <XpBySubjectChart data={chartData} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>✍️ Freeform XP by Subject</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <FreeformXpChart data={freeformXpData} />
           </CardContent>
         </Card>
 

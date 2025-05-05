@@ -236,7 +236,7 @@ export default function LearningAssistant() {
     return () =>
       window.removeEventListener("answer-attempt", handleAnswerAttempt);
   }, [userId]);
-
+  
   useEffect(() => {
     const handleXpUpdated = async () => {
       if (!userId) return;
@@ -309,6 +309,8 @@ export default function LearningAssistant() {
     };
   }, [lastActivity]);
 
+
+  
   // Emotional check-in timer
   useEffect(() => {
     // Show emotional check-in every 10 minutes
@@ -335,6 +337,7 @@ export default function LearningAssistant() {
         console.warn("⚠️ Skipping loadProgress — no userId");
         return;
       }
+
       const subjectId = subjectMap[activeSubject];
       if (!subjectId) {
         console.warn(
@@ -353,15 +356,21 @@ export default function LearningAssistant() {
       );
       const data = await res.json();
 
-      // ✅ Immediately sync state to DB
+      // ✅ Sync XP state
       setXpPoints(data.xp ?? 0);
       setUserLevel(data.level ?? 1);
 
       console.log("📈 Progress data received:", data);
+
+      // 🧹 NEW: Reset chat state on subject switch
+      window.dispatchEvent(new CustomEvent("ai-message", { detail: [] })); // Clear chat
+      window.dispatchEvent(new CustomEvent("reset-attempts")); // Reset attempts
+      setCurrentChallengeId(null); // optional reset
     };
 
     loadProgress();
   }, [userId, activeSubject]);
+
 
   const handlePromptClick = async (promptText: string, challengeId: number) => {
     setCurrentChallengeId(challengeId);
