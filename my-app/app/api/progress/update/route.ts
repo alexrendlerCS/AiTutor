@@ -1,3 +1,5 @@
+// my-app/app/api/progress/update/route.ts
+
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -6,9 +8,23 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// Calculate required XP for each level
+// XP needed for a given level
 function getRequiredXpForLevel(level: number): number {
   return Math.floor(100 * Math.pow(level, 1.15));
+}
+
+// Get level from total XP (without subtracting it)
+function getLevelFromXp(totalXp: number): number {
+  let level = 1;
+  let xpToNext = getRequiredXpForLevel(level);
+
+  while (totalXp >= xpToNext) {
+    totalXp -= xpToNext;
+    level += 1;
+    xpToNext = getRequiredXpForLevel(level);
+  }
+
+  return level;
 }
 
 export async function POST(req: NextRequest) {
@@ -21,38 +37,16 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Step 1: Fetch current progress
-  const { data: progress, error: fetchError } = await supabase
-    .from("user_progress")
-    .select("level")
-    .eq("user_id", user_id)
-    .eq("subject_id", subject)
-    .single();
+  // Compute level directly from total XP
+  const newLevel = getLevelFromXp(xp);
 
-  if (fetchError && fetchError.code !== "PGRST116") {
-    console.error("Error fetching progress:", fetchError);
-    return NextResponse.json(
-      { error: "Could not fetch current progress" },
-      { status: 500 }
-    );
-  }
-
-  let currentLevel = progress?.level ?? 1;
-  let remainingXp = xp;
-
-  // Step 2: Level up based on the XP received (which is total, not delta!)
-  while (remainingXp >= getRequiredXpForLevel(currentLevel)) {
-    remainingXp -= getRequiredXpForLevel(currentLevel);
-    currentLevel += 1;
-  }
-
-  // Step 3: Store the XP directly (already includes optimistic addition)
+  // Store total XP and computed level
   const { error: updateError } = await supabase.from("user_progress").upsert(
     {
       user_id,
       subject_id: subject,
-      xp: remainingXp,
-      level: currentLevel,
+      xp, // ✅ Store full XP (not subtracted)
+      level: newLevel,
     },
     { onConflict: "user_id,subject_id" }
   );
@@ -60,8 +54,8 @@ export async function POST(req: NextRequest) {
   console.log("📝 Final XP write:", {
     user_id,
     subject,
-    xp: remainingXp,
-    level: currentLevel,
+    xp,
+    level: newLevel,
   });
 
   if (updateError) {
@@ -72,5 +66,5 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  return NextResponse.json({ xp: remainingXp, level: currentLevel });
+  return NextResponse.json({ xp, level: newLevel });
 }

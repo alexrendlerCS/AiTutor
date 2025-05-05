@@ -1,46 +1,48 @@
-"use client"
+"use client";
 
-import { useState, useEffect, useRef } from "react"
-import { Sidebar } from "../components/sidebar"
-import { ChatInterface } from "../components/chat-interface"
-import { ProgressTracker } from "../components/progress-tracker"
-import { ParentDashboardButton } from "../components/parent-dashboard-button"
-import { BreakButton } from "../components/break-button"
-import { FocusModeButton } from "../components/focus-mode-button"
-import { IdlePrompt } from "../components/idle-prompt"
-import { EmotionalCheckIn } from "../components/emotional-check-in"
-import { getUserFromToken } from "../lib/auth"
+import { useState, useEffect, useRef } from "react";
+import { Sidebar } from "../components/sidebar";
+import { ChatInterface } from "../components/chat-interface";
+import { ProgressTracker } from "../components/progress-tracker";
+import { ParentDashboardButton } from "../components/parent-dashboard-button";
+import { BreakButton } from "../components/break-button";
+import { FocusModeButton } from "../components/focus-mode-button";
+import { IdlePrompt } from "../components/idle-prompt";
+import { EmotionalCheckIn } from "../components/emotional-check-in";
+import { getUserFromToken } from "../lib/auth";
 
-export type Subject = "math" | "reading" | "spelling" | "exploration"
-export type Emotion = "happy" | "neutral" | "sad" | null
+export type Subject = "math" | "reading" | "spelling" | "exploration";
+export type Emotion = "happy" | "neutral" | "sad" | null;
 const getSubjectId = async (subjectName: string): Promise<number | null> => {
-  const res = await fetch(`/api/subjects?id_by_name=${subjectName}`)
-  const { id } = await res.json()
-  return id ?? null
-}
+  const res = await fetch(`/api/subjects?id_by_name=${subjectName}`);
+  const { id } = await res.json();
+  return id ?? null;
+};
 
 export default function LearningAssistant() {
-  const [activeSubject, setActiveSubject] = useState<Subject>("math")
-  const [xpPoints, setXpPoints] = useState(0)
-  const [focusMode, setFocusMode] = useState(false)
-  const [focusTimeRemaining, setFocusTimeRemaining] = useState(5 * 60) // 5 minutes in seconds
-  const [isIdle, setIsIdle] = useState(false)
-  const [lastActivity, setLastActivity] = useState(Date.now())
-  const [showEmotionalCheckIn, setShowEmotionalCheckIn] = useState(false)
-  const [emotion, setEmotion] = useState<Emotion>(null)
-  const idleTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const focusTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const emotionalCheckTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const [userId, setUserId] = useState("")
-  const [userLevel, setUserLevel]               = useState(1)     
-  const [currentChallengeId, setCurrentChallengeId] = useState<number | null>(null) 
+  const [activeSubject, setActiveSubject] = useState<Subject>("math");
+  const [xpPoints, setXpPoints] = useState(0);
+  const [focusMode, setFocusMode] = useState(false);
+  const [focusTimeRemaining, setFocusTimeRemaining] = useState(5 * 60); // 5 minutes in seconds
+  const [isIdle, setIsIdle] = useState(false);
+  const [lastActivity, setLastActivity] = useState(Date.now());
+  const [showEmotionalCheckIn, setShowEmotionalCheckIn] = useState(false);
+  const [emotion, setEmotion] = useState<Emotion>(null);
+  const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const focusTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const emotionalCheckTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [userId, setUserId] = useState("");
+  const [userLevel, setUserLevel] = useState(1);
+  const [currentChallengeId, setCurrentChallengeId] = useState<number | null>(
+    null
+  );
   const subjectMap: Record<Subject, number> = {
     math: 1,
     reading: 2,
     spelling: 3,
     exploration: 4,
-  }
-  
+  };
+
   useEffect(() => {
     fetch("/api/user")
       .then((res) => res.json())
@@ -53,45 +55,63 @@ export default function LearningAssistant() {
       });
   }, []);
 
-
-
-  
   // Reset idle timer on activity
   const handleActivity = () => {
-    setLastActivity(Date.now())
-    setIsIdle(false)
-  }
+    setLastActivity(Date.now());
+    setIsIdle(false);
+  };
 
   // Handles AI implementation
   const handleSendMessage = (message: string) => {
-    console.log("Sending message:", message)
-    handleActivity()
-  }
+    console.log("Sending message:", message);
+    handleActivity();
+  };
 
-  const uploadXpToDatabase = async (newXp: number) => {
-    const subjectId = subjectMap[activeSubject];
+  const uploadXpToDatabase = async (newXp: number, subject: Subject) => {
+    const subjectId = subjectMap[subject];
     if (!userId || !subjectId) {
       console.warn("⚠️ Skipping XP upload — missing userId or subjectId");
       return;
     }
 
-    const res = await fetch("/api/progress/update", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        user_id: userId,
-        subject: subjectId,
-        xp: newXp,
-      }),
-    });
+    try {
+      // 🧪 Check current XP from DB before writing
+      const preCheck = await fetch(
+        `/api/progress?user_id=${userId}&subject=${subjectId}`
+      );
+      const preData = await preCheck.json();
+      const currentDbXp = preData?.xp ?? 0;
 
-    
-    const data = await res.json();
-    if (res.ok) {
-      console.log("✅ XP successfully updated in DB:", data);
-      window.dispatchEvent(new CustomEvent("xp-updated")); // only refetch after confirmed update
-    } else {
-      console.error("❌ Failed to update XP in DB:", data.error);
+      console.log("🔍 XP in DB BEFORE write:", preData);
+
+      if (newXp <= currentDbXp) {
+        console.warn(
+          `⚠️ Skipping XP write — attempted to overwrite with lower or equal value (new: ${newXp}, current: ${currentDbXp})`
+        );
+        return;
+      }
+
+      const res = await fetch("/api/progress/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          subject: subjectId,
+          xp: newXp,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        console.log("✅ XP successfully updated in DB:", data);
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent("xp-updated"));
+        }, 800);
+      } else {
+        console.error("❌ Failed to update XP in DB:", data.error);
+      }
+    } catch (err) {
+      console.error("❌ Error in uploadXpToDatabase:", err);
     }
   };
 
@@ -112,12 +132,51 @@ export default function LearningAssistant() {
 
       // 🌟 Apply optimistic XP increase only if NOT a challenge
       if (!challengeId) {
+        const subjectId = subjectMap[subject];
+        const res = await fetch(
+          `/api/progress?user_id=${userId}&subject=${subjectId}`
+        );
+        const data = await res.json();
+
+        const currentDbXp = data?.xp ?? 0;
+        const newXp = currentDbXp + xpEarned;
+
+        console.log("🌟 Optimistically updating XP to:", newXp);
+        setXpPoints(newXp);
+        uploadXpToDatabase(newXp, subject);
+
+      } else {
+        // ✅ For challenges, just update visually (RPC will handle backend)
         setXpPoints((prev) => {
           const newXp = prev + xpEarned;
-          console.log("🌟 Optimistically updating XP to:", newXp);
-          uploadXpToDatabase(newXp); // ← this is only for prompts, not challenges
+          console.log("🌟 Optimistically updating XP (challenge):", newXp);
           return newXp;
         });
+      }
+
+      // 🧠 Log freeform AI prompt attempt to user_prompt_attempts
+      try {
+        const subjectId = subjectMap[subject];
+        if (!subjectId || !userId) return;
+
+        const res = await fetch("/api/xp/prompts/log", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: userId,
+            subject_id: subjectId,
+            prompt: "N/A", // or replace with actual question if available
+            success: correct,
+            attempts,
+            used_hint: false,
+            xp_earned: xpEarned,
+          }),
+        });
+
+        const result = await res.json();
+        console.log("🧾 Logged freeform prompt:", result);
+      } catch (err) {
+        console.error("❌ Failed to log freeform prompt attempt:", err);
       }
 
       // 📝 Log challenge attempt — backend handles XP update there
@@ -137,6 +196,17 @@ export default function LearningAssistant() {
 
           const result = await res.json();
           console.log("📝 XP Log Result:", result);
+          console.log("📦 Logging XP with payload:", {
+            user_id: userId,
+            challenge_id: challengeId,
+            success: correct,
+            attempts,
+            xp_earned: xpEarned,
+          });
+
+          if (!res.ok) {
+            console.error("❌ Challenge XP log failed:", result);
+          }
 
           if (correct) {
             // 👇 Generate a new challenge after correct answer
@@ -154,8 +224,12 @@ export default function LearningAssistant() {
         }
       }
 
-      // 🚀 Final trigger to refresh XP from DB
-      window.dispatchEvent(new CustomEvent("xp-updated"));
+      // ✅ Only trigger xp-updated refetch after CHALLENGE attempts
+      if (challengeId) {
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent("xp-updated"));
+        }, 1000);
+      }
     };
 
     window.addEventListener("answer-attempt", handleAnswerAttempt);
@@ -169,239 +243,247 @@ export default function LearningAssistant() {
       const subjectId = subjectMap[activeSubject];
       if (!subjectId) return;
 
-      // Wait briefly for backend to finalize write
-      await new Promise((r) => setTimeout(r, 300));
+      // ⏳ Wait to allow backend to finish
+      await new Promise((res) => setTimeout(res, 600)); // increase delay to 600ms
 
       console.log("🔄 Refetching XP after challenge logging...");
 
-          const res = await fetch(
-            `/api/progress?user_id=${userId}&subject=${subjectId}`
-          );
-          const data = await res.json();
+      const res = await fetch(
+        `/api/progress?user_id=${userId}&subject=${subjectId}`
+      );
+      const data = await res.json();
 
-          console.log(
-            "📬 Refetched XP from DB:",
-            data.xp,
-            "Level:",
-            data.level
-          );
+      console.log("📬 Refetched XP from DB:", data.xp, "Level:", data.level);
 
-          setXpPoints(data.xp ?? 0);
-          setUserLevel(data.level ?? 1);
-
+      setXpPoints(data.xp ?? 0);
+      setUserLevel(data.level ?? 1);
     };
 
     window.addEventListener("xp-updated", handleXpUpdated);
     return () => window.removeEventListener("xp-updated", handleXpUpdated);
   }, [userId, activeSubject]);
 
-
-  
   // Handle focus mode timer
   useEffect(() => {
     if (focusMode && focusTimeRemaining > 0) {
       focusTimerRef.current = setInterval(() => {
-        setFocusTimeRemaining((prev) => prev - 1)
-      }, 1000)
+        setFocusTimeRemaining((prev) => prev - 1);
+      }, 1000);
     } else if (!focusMode) {
-      if (focusTimerRef.current) clearInterval(focusTimerRef.current)
-      setFocusTimeRemaining(5 * 60) // Reset to 5 minutes
+      if (focusTimerRef.current) clearInterval(focusTimerRef.current);
+      setFocusTimeRemaining(5 * 60); // Reset to 5 minutes
     } else if (focusTimeRemaining <= 0) {
-      setFocusMode(false)
-      if (focusTimerRef.current) clearInterval(focusTimerRef.current)
+      setFocusMode(false);
+      if (focusTimerRef.current) clearInterval(focusTimerRef.current);
     }
 
     return () => {
-      if (focusTimerRef.current) clearInterval(focusTimerRef.current)
-    }
-  }, [focusMode, focusTimeRemaining])
+      if (focusTimerRef.current) clearInterval(focusTimerRef.current);
+    };
+  }, [focusMode, focusTimeRemaining]);
 
   // Handle idle detection
   useEffect(() => {
-    const idleThreshold = 15000 // 15 seconds
+    const idleThreshold = 15000; // 15 seconds
 
     const checkIdle = () => {
-      const now = Date.now()
+      const now = Date.now();
       if (now - lastActivity > idleThreshold) {
-        setIsIdle(true)
+        setIsIdle(true);
       }
-    }
+    };
 
-    idleTimerRef.current = setInterval(checkIdle, 5000) // Check every 5 seconds
+    idleTimerRef.current = setInterval(checkIdle, 5000); // Check every 5 seconds
 
     // Set up event listeners for user activity
-    const activityEvents = ["mousedown", "keydown", "touchstart", "scroll"]
+    const activityEvents = ["mousedown", "keydown", "touchstart", "scroll"];
     activityEvents.forEach((event) => {
-      window.addEventListener(event, handleActivity)
-    })
+      window.addEventListener(event, handleActivity);
+    });
 
     return () => {
-      if (idleTimerRef.current) clearInterval(idleTimerRef.current)
+      if (idleTimerRef.current) clearInterval(idleTimerRef.current);
       activityEvents.forEach((event) => {
-        window.removeEventListener(event, handleActivity)
-      })
-    }
-  }, [lastActivity])
+        window.removeEventListener(event, handleActivity);
+      });
+    };
+  }, [lastActivity]);
 
   // Emotional check-in timer
   useEffect(() => {
     // Show emotional check-in every 10 minutes
-    emotionalCheckTimerRef.current = setInterval(
-      () => {
-        setShowEmotionalCheckIn(true)
-      },
-      10 * 60 * 1000,
-    ) // 10 minutes
+    emotionalCheckTimerRef.current = setInterval(() => {
+      setShowEmotionalCheckIn(true);
+    }, 10 * 60 * 1000); // 10 minutes
 
     return () => {
-      if (emotionalCheckTimerRef.current) clearInterval(emotionalCheckTimerRef.current)
-    }
-  }, [])
-  
+      if (emotionalCheckTimerRef.current)
+        clearInterval(emotionalCheckTimerRef.current);
+    };
+  }, []);
+
   const handleEmotionSelected = (selectedEmotion: Emotion) => {
-    setEmotion(selectedEmotion)
-    setShowEmotionalCheckIn(false)
+    setEmotion(selectedEmotion);
+    setShowEmotionalCheckIn(false);
     // In a real app, you would use this emotion to adapt the learning experience
-  }
+  };
 
-    // 2️⃣ whenever we have both userId & activeSubject, fetch XP+level:
-    useEffect(() => {
-      const loadProgress = async () => {
-        if (!userId) {
-          console.warn("⚠️ Skipping loadProgress — no userId");
-          return;
-        }
-        const subjectId = subjectMap[activeSubject]
-         if (!subjectId) {
-           console.warn(
-             "⚠️ Skipping loadProgress — invalid subjectId for:",
-             activeSubject
-           );
-           return;
-         }
-        console.log(`📦 Loading progress for user: ${userId}, subject: ${activeSubject} (id: ${subjectId})`);
-
-        const res = await fetch(`/api/progress?user_id=${userId}&subject=${subjectId}`)
-        const data = await res.json()
-        setXpPoints(data.xp    ?? 0)
-        setUserLevel(data.level ?? 1)      // ← populate level
-        console.log("📈 Progress data received:", data);
+  // 2️⃣ whenever we have both userId & activeSubject, fetch XP+level:
+  useEffect(() => {
+    const loadProgress = async () => {
+      if (!userId) {
+        console.warn("⚠️ Skipping loadProgress — no userId");
+        return;
       }
-  
-      loadProgress()
-    }, [userId, activeSubject])
-    
-    const handlePromptClick = async (promptText: string, challengeId: number) => {
-      setCurrentChallengeId(challengeId)   
-      const typingId = "typing"
-      const userMsgId = crypto.randomUUID()
-      const assistantId = crypto.randomUUID()
-    
-      // 1. Show user message and assistant typing
-      window.dispatchEvent(
-        new CustomEvent("ai-message", {
-          detail: [
-            {
-              id: userMsgId,
-              content: promptText,
-              sender: "user",
-            },
-            {
-              id: typingId,
-              content: "",
-              sender: "assistant",
-              isTyping: true,
-            },
-          ],
-        })
-      )
-    
-      // 2. Fetch assistant response
-      const response = await fetch("/api/ai", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: promptText, subject: activeSubject }),
+      const subjectId = subjectMap[activeSubject];
+      if (!subjectId) {
+        console.warn(
+          "⚠️ Skipping loadProgress — invalid subjectId for:",
+          activeSubject
+        );
+        return;
+      }
+
+      console.log(
+        `📦 Loading progress for user: ${userId}, subject: ${activeSubject} (id: ${subjectId})`
+      );
+
+      const res = await fetch(
+        `/api/progress?user_id=${userId}&subject=${subjectId}`
+      );
+      const data = await res.json();
+
+      // ✅ Immediately sync state to DB
+      setXpPoints(data.xp ?? 0);
+      setUserLevel(data.level ?? 1);
+
+      console.log("📈 Progress data received:", data);
+    };
+
+    loadProgress();
+  }, [userId, activeSubject]);
+
+  const handlePromptClick = async (promptText: string, challengeId: number) => {
+    setCurrentChallengeId(challengeId);
+    const typingId = "typing";
+    const userMsgId = crypto.randomUUID();
+    const assistantId = crypto.randomUUID();
+
+    // 1. Show user message and assistant typing
+    window.dispatchEvent(
+      new CustomEvent("ai-message", {
+        detail: [
+          {
+            id: userMsgId,
+            content: promptText,
+            sender: "user",
+          },
+          {
+            id: typingId,
+            content: "",
+            sender: "assistant",
+            isTyping: true,
+          },
+        ],
       })
-    
-      const { reply } = await response.json()
-    
-      // 3. Dispatch final assistant reply
-      window.dispatchEvent(
-        new CustomEvent("ai-message", {
-          detail: [
-            {
-              id: assistantId,
-              content: reply,
-              sender: "assistant",
-            },
-          ],
-        })
-      )
-    }
-    
+    );
+
+    // 2. Fetch assistant response
+    const response = await fetch("/api/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: promptText, subject: activeSubject }),
+    });
+
+    const { reply } = await response.json();
+
+    // 3. Dispatch final assistant reply
+    window.dispatchEvent(
+      new CustomEvent("ai-message", {
+        detail: [
+          {
+            id: assistantId,
+            content: reply,
+            sender: "assistant",
+          },
+        ],
+      })
+    );
+  };
+
   return (
     <div className="flex h-screen w-full overflow-hidden">
       {/* Sidebar with subject navigation - hidden in focus mode */}
-      {!focusMode && <Sidebar activeSubject={activeSubject} onSubjectChange={setActiveSubject} />}
+      {!focusMode && (
+        <Sidebar
+          activeSubject={activeSubject}
+          onSubjectChange={setActiveSubject}
+        />
+      )}
 
       {/* Main content area */}
-      <div className={`flex flex-col flex-1 p-4 md:p-6 overflow-hidden ${focusMode ? "bg-blue-50" : ""}`}>
+      <div
+        className={`flex flex-col flex-1 p-4 md:p-6 overflow-hidden ${
+          focusMode ? "bg-blue-50" : ""
+        }`}
+      >
         <div className="flex justify-between items-center mb-4">
-          <h1 className="text-2xl md:text-3xl font-bold text-purple-700">Learning Buddy</h1>
-          
+          <h1 className="text-2xl md:text-3xl font-bold text-purple-700">
+            Learning Buddy
+          </h1>
 
           {/* Focus mode timer */}
           {focusMode && (
             <div className="bg-white px-3 py-1 rounded-full text-sm font-medium text-purple-600 animate-pulse">
               Let's stay focused for {Math.floor(focusTimeRemaining / 60)}:
-              {(focusTimeRemaining % 60).toString().padStart(2, "0")} more minutes!
+              {(focusTimeRemaining % 60).toString().padStart(2, "0")} more
+              minutes!
             </div>
           )}
 
           <div className="flex items-center gap-2">
-            <FocusModeButton isActive={focusMode} onToggle={() => setFocusMode(!focusMode)} />
+            <FocusModeButton
+              isActive={focusMode}
+              onToggle={() => setFocusMode(!focusMode)}
+            />
             <BreakButton />
             <ParentDashboardButton />
           </div>
         </div>
 
         <div className="flex flex-col md:flex-row gap-4 h-full">
-  {/* Main chat area */}
-  <div className="flex-1 flex flex-col">
-    <ProgressTracker xpPoints={xpPoints} level={userLevel} />
+          {/* Main chat area */}
+          <div className="flex-1 flex flex-col">
+            <ProgressTracker xpPoints={xpPoints} level={userLevel} />
 
-    {/* Challenge Questions */}
-    {userId && (
-      <IdlePrompt
-      subject={activeSubject}
-      level={userLevel}
-      userId={userId}
-      initialXP={xpPoints}
-      onEarnXp={(xp) => setXpPoints((prev) => prev + xp)}
-      onPromptClick={(prompt, id) => {
-        handlePromptClick(prompt, id)
-      }}      
-    />
-    
-    )}
+            {/* Challenge Questions */}
+            {userId && (
+              <IdlePrompt
+                subject={activeSubject}
+                level={userLevel}
+                userId={userId}
+                initialXP={xpPoints}
+                onEarnXp={(xp) => setXpPoints((prev) => prev + xp)}
+                onPromptClick={(prompt, id) => {
+                  handlePromptClick(prompt, id);
+                }}
+              />
+            )}
 
-<ChatInterface
-  subject={activeSubject}
-  onSendMessage={handleSendMessage}
-  userId={userId}
-  currentChallengeId={currentChallengeId} // ✅ new
-/>
+            <ChatInterface
+              subject={activeSubject}
+              onSendMessage={handleSendMessage}
+              userId={userId}
+              currentChallengeId={currentChallengeId} // ✅ new
+            />
 
-
-
-    {/* Emotional check-in */}
-    {showEmotionalCheckIn && (
-      <EmotionalCheckIn onEmotionSelected={handleEmotionSelected} />
-    )}
-  </div>
-</div>
-
+            {/* Emotional check-in */}
+            {showEmotionalCheckIn && (
+              <EmotionalCheckIn onEmotionSelected={handleEmotionSelected} />
+            )}
+          </div>
+        </div>
       </div>
     </div>
-  )
+  );
 }

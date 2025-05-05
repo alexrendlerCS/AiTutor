@@ -46,10 +46,12 @@ export async function POST(req: Request) {
             used_hint,
             xp_earned,
             prompt_type,
+            subject_id, 
           },
         ],
         { onConflict: "user_id,challenge_id" }
       );
+
 
     if (upsertError) {
       if (upsertError.code === "23505") {
