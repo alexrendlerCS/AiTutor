@@ -4,8 +4,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
 
 export async function POST(req: NextRequest) {
-  const cookieStore = cookies(); // ✅ Get cookies
-  const supabase = createServerComponentClient({ cookies: () => cookieStore }); // ✅ Wrap in function
+  const cookieStore = cookies();
+  const supabase = createServerComponentClient({ cookies: () => cookieStore });
 
   const {
     data: { user },
@@ -25,6 +25,31 @@ export async function POST(req: NextRequest) {
     spelling: 3,
     exploration: 4,
   };
+
+  const subjectId = subjectMap[subject?.toLowerCase()];
+  if (!subjectId) {
+    return NextResponse.json({ error: "Invalid subject" }, { status: 400 });
+  }
+
+  const { data: existingChallenge } = await supabase
+    .from("active_challenges")
+    .select("prompt, difficulty, prompt_type")
+    .eq("user_id", user.id)
+    .eq("subject_id", subjectId)
+    .single();
+
+  const previousPrompt = existingChallenge?.prompt ?? null;
+  const previousDifficulty = existingChallenge?.difficulty ?? 1;
+  const previousPromptType = existingChallenge?.prompt_type ?? null;
+
+  const { data: progress } = await supabase
+    .from("user_progress")
+    .select("level")
+    .eq("user_id", user.id)
+    .eq("subject_id", subjectId)
+    .single();
+
+  const level = progress?.level ?? 1;
 
   function detectPromptType(prompt: string, subject: string): string {
     if (subject === "math") {
@@ -60,34 +85,6 @@ export async function POST(req: NextRequest) {
     return "general";
   }
 
-  const subjectId = subjectMap[subject?.toLowerCase()];
-  if (!subjectId) {
-    return NextResponse.json({ error: "Invalid subject" }, { status: 400 });
-  }
-  
-  // 🎯 Fetch prior challenge for context (but don’t block generation)
-  const { data: existingChallenge } = await supabase
-    .from("active_challenges")
-    .select("prompt, difficulty, prompt_type") 
-    .eq("user_id", user.id)
-    .eq("subject_id", subjectId)
-    .single();
-
-  const previousPrompt = existingChallenge?.prompt ?? null;
-  const previousDifficulty = existingChallenge?.difficulty ?? 1;
-  const previousPromptType = existingChallenge?.prompt_type ?? null;
-
-
-  // 🧠 Get user level for difficulty context
-  const { data: progress } = await supabase
-    .from("user_progress")
-    .select("level")
-    .eq("user_id", user.id)
-    .eq("subject_id", subjectId)
-    .single();
-
-  const level = progress?.level ?? 1;
-
   function getVariationInstructions(subject: string) {
     switch (subject.toLowerCase()) {
       case "math":
@@ -100,7 +97,7 @@ Rotate between different types of math problems:
 - Estimations
 - Missing number (e.g., 3 + ❓ = 10)
 Avoid repeating the same structure as the last prompt.
-      `;
+        `;
       case "reading":
         return `
 Generate reading comprehension questions like:
@@ -109,7 +106,7 @@ Generate reading comprehension questions like:
 - Why did the character do that?
 - What word means the same as...?
 Use short fictional or factual excerpts appropriate for the level.
-      `;
+        `;
       case "spelling":
         return `
 Create spelling-based challenges like:
@@ -117,7 +114,7 @@ Create spelling-based challenges like:
 - "Spell the word that means a small dog."
 - "Fix the spelling mistake in: 'The boy runned to the store.'"
 Keep it fun and level-appropriate.
-      `;
+        `;
       case "exploration":
         return `
 Ask open-ended or knowledge-building questions about:
@@ -125,7 +122,7 @@ Ask open-ended or knowledge-building questions about:
 - Science (e.g., What happens when water boils?)
 - Geography (e.g., Name a place that is always cold)
 Use quiz or thought-provoking formats that make them curious.
-      `;
+        `;
       default:
         return "";
     }
@@ -136,7 +133,6 @@ Use quiz or thought-provoking formats that make them curious.
     (previousPromptType
       ? `\nAvoid repeating the same type of question as last time, which was "${previousPromptType}".`
       : "");
-
 
   const systemPrompt = `
 You are an intelligent tutor generating personalized challenge questions for a ${subject} student.
@@ -167,7 +163,6 @@ ${variation}
 Now generate the next challenge:
 `.trim();
 
-
   const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -184,40 +179,65 @@ Now generate the next challenge:
   const aiData = await aiRes.json();
   const newPrompt = aiData?.choices?.[0]?.message?.content?.trim();
 
-  const promptType = detectPromptType(newPrompt, subject);
-
   if (!newPrompt) {
     return NextResponse.json(
       { error: "Failed to generate challenge" },
       { status: 500 }
     );
   }
-  
-  const { data: inserted, error: upsertError } = await supabase
+
+  const promptType = detectPromptType(newPrompt, subject);
+
+  // 1️⃣ Insert into 'challenges' table first
+  const { data: insertedChallenge, error: insertError } = await supabase
+    .from("challenges")
+    .insert({
+      user_id: user.id,
+      subject_id: subjectId,
+      question_text: newPrompt,
+      difficulty_level: previousDifficulty + 1,
+      prompt_type: promptType,
+    })
+    .select()
+    .single();
+
+  if (insertError || !insertedChallenge) {
+    console.error("❌ Error inserting challenge:", insertError);
+    return NextResponse.json(
+      { error: "Challenge insert failed" },
+      { status: 500 }
+    );
+  }
+
+  // 2️⃣ Upsert into 'active_challenges'
+  const { error: upsertError } = await supabase
     .from("active_challenges")
     .upsert(
       {
         user_id: user.id,
         subject_id: subjectId,
         prompt: newPrompt,
-        difficulty: previousDifficulty + 1,
+        difficulty: insertedChallenge.difficulty_level,
         prompt_type: promptType,
       },
       { onConflict: "user_id,subject_id" }
-    )
-    .select()
-    .single();
-  console.log(
-    `✅ Generated ${subject} challenge for user ${user.id}:`,
-    newPrompt
-  );
+    );
+
   if (upsertError) {
-    console.error("❌ Error storing challenge:", upsertError);
+    console.error("❌ Error upserting active challenge:", upsertError);
     return NextResponse.json(
-      { error: "Failed to store challenge" },
+      { error: "Active challenge update failed" },
       { status: 500 }
     );
   }
 
-  return NextResponse.json({ challenge: inserted });
+  console.log(`✅ Generated challenge for user ${user.id}:`, newPrompt);
+
+  return NextResponse.json({
+    challenge: {
+      prompt: newPrompt,
+      challenge_id: insertedChallenge.id, // 🎯 Use this for logging later
+      difficulty: insertedChallenge.difficulty_level,
+    },
+  });
 }

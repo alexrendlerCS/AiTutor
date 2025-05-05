@@ -41,7 +41,7 @@ export function ChatInterface({ subject, onSendMessage, userId, currentChallenge
   const [guessCount, setGuessCount] = useState(0)
 
   const isAnswerCorrect = (assistantMessage: string): boolean =>
-    assistantMessage.toLowerCase().includes("Correct!");
+    assistantMessage.toLowerCase().includes("correct!");
 
 
   const handleSend = async () => {

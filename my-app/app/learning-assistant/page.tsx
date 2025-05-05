@@ -209,12 +209,26 @@ export default function LearningAssistant() {
           }
 
           if (correct) {
-            // 👇 Generate a new challenge after correct answer
-            await fetch("/api/xp/challenges/generate", {
+            const challengeRes = await fetch("/api/xp/challenges/generate", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ subject }),
             });
+            const challengeData = await challengeRes.json();
+            if (challengeRes.ok && challengeData.challenge?.challenge_id) {
+              setCurrentChallengeId(challengeData.challenge.challenge_id); // ✅ Store for future attempts
+              console.log(
+                "🆕 Set new challenge ID:",
+                challengeData.challenge.challenge_id
+              );
+              window.dispatchEvent(new CustomEvent("challenge-complete"));
+            } else {
+              console.warn(
+                "⚠️ Challenge generate failed:",
+                challengeData.error
+              );
+            }
+
 
             // ✅ Notify IdlePrompt to reload
             window.dispatchEvent(new CustomEvent("challenge-complete"));
