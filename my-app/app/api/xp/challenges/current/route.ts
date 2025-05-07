@@ -29,15 +29,36 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid subject" }, { status: 400 });
   }
 
-  const { data: challenge, error } = await supabase
+  // Join active_challenges with challenges to get the correct challenge_id and difficulty
+  const { data, error } = await supabase
     .from("active_challenges")
-    .select("*")
+    .select(
+      `challenge_id, prompt, difficulty, prompt_type, updated_at, last_reset`
+    )
     .eq("user_id", user.id)
     .eq("subject_id", subjectId)
     .single();
 
   if (error) {
     return NextResponse.json({ challenge: null }, { status: 200 });
+  }
+
+  // If challenge_id is present, fetch the challenge for full details
+  let challenge = data;
+  if (data?.challenge_id) {
+    const { data: challengeRow, error: challengeError } = await supabase
+      .from("challenges")
+      .select("id, prompt, difficulty, prompt_type")
+      .eq("id", data.challenge_id)
+      .single();
+    if (!challengeError && challengeRow) {
+      challenge = {
+        ...challengeRow,
+        challenge_id: challengeRow.id,
+        updated_at: data.updated_at,
+        last_reset: data.last_reset,
+      };
+    }
   }
 
   return NextResponse.json({ challenge });

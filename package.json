@@ -1,5 +1,6 @@
 {
   "dependencies": {
-    "framer-motion": "^12.9.2"
+    "framer-motion": "^12.9.2",
+    "react-use": "^17.6.0"
   }
 }

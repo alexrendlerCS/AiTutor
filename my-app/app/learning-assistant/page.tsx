@@ -10,6 +10,8 @@ import { FocusModeButton } from "../components/focus-mode-button";
 import { IdlePrompt } from "../components/idle-prompt";
 import { EmotionalCheckIn } from "../components/emotional-check-in";
 import { getUserFromToken } from "../lib/auth";
+import Confetti from "react-confetti";
+import { useWindowSize } from "react-use";
 
 export type Subject = "math" | "reading" | "spelling" | "exploration";
 export type Emotion = "happy" | "neutral" | "sad" | null;
@@ -18,6 +20,18 @@ const getSubjectId = async (subjectName: string): Promise<number | null> => {
   const { id } = await res.json();
   return id ?? null;
 };
+
+// Helper to get XP toward current level (same as ProgressTracker)
+function getRequiredXpForLevel(level: number): number {
+  return Math.floor(100 * Math.pow(level, 1.15));
+}
+function getXpForCurrentLevel(totalXp: number, level: number): number {
+  let xp = totalXp;
+  for (let lvl = 1; lvl < level; lvl++) {
+    xp -= getRequiredXpForLevel(lvl);
+  }
+  return xp;
+}
 
 export default function LearningAssistant() {
   const [activeSubject, setActiveSubject] = useState<Subject>("math");
@@ -36,6 +50,9 @@ export default function LearningAssistant() {
   const [currentChallengeId, setCurrentChallengeId] = useState<number | null>(
     null
   );
+  const [showLevelUp, setShowLevelUp] = useState(false);
+  const [prevLevel, setPrevLevel] = useState(1);
+  const { width, height } = useWindowSize();
   const subjectMap: Record<Subject, number> = {
     math: 1,
     reading: 2,
@@ -144,7 +161,6 @@ export default function LearningAssistant() {
         console.log("🌟 Optimistically updating XP to:", newXp);
         setXpPoints(newXp);
         uploadXpToDatabase(newXp, subject);
-
       } else {
         // ✅ For challenges, just update visually (RPC will handle backend)
         setXpPoints((prev) => {
@@ -159,22 +175,25 @@ export default function LearningAssistant() {
         const subjectId = subjectMap[subject];
         if (!subjectId || !userId) return;
 
-        const res = await fetch("/api/xp/prompts/log", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            user_id: userId,
-            subject_id: subjectId,
-            prompt: "N/A", // or replace with actual question if available
-            success: correct,
-            attempts,
-            used_hint: false,
-            xp_earned: xpEarned,
-          }),
-        });
+        // Only log freeform prompts when there is no challengeId
+        if (!challengeId) {
+          const res = await fetch("/api/xp/prompts/log", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              user_id: userId,
+              subject_id: subjectId,
+              prompt: "N/A", // or replace with actual question if available
+              success: correct,
+              attempts,
+              used_hint: false,
+              xp_earned: xpEarned,
+            }),
+          });
 
-        const result = await res.json();
-        console.log("🧾 Logged freeform prompt:", result);
+          const result = await res.json();
+          console.log("🧾 Logged freeform prompt:", result);
+        }
       } catch (err) {
         console.error("❌ Failed to log freeform prompt attempt:", err);
       }
@@ -229,7 +248,6 @@ export default function LearningAssistant() {
               );
             }
 
-
             // ✅ Notify IdlePrompt to reload
             window.dispatchEvent(new CustomEvent("challenge-complete"));
           }
@@ -250,7 +268,7 @@ export default function LearningAssistant() {
     return () =>
       window.removeEventListener("answer-attempt", handleAnswerAttempt);
   }, [userId]);
-  
+
   useEffect(() => {
     const handleXpUpdated = async () => {
       if (!userId) return;
@@ -323,8 +341,6 @@ export default function LearningAssistant() {
     };
   }, [lastActivity]);
 
-
-  
   // Emotional check-in timer
   useEffect(() => {
     // Show emotional check-in every 10 minutes
@@ -385,8 +401,9 @@ export default function LearningAssistant() {
     loadProgress();
   }, [userId, activeSubject]);
 
-
   const handlePromptClick = async (promptText: string, challengeId: number) => {
+    // Reset attempts/guessCount in ChatInterface when a challenge is selected
+    window.dispatchEvent(new CustomEvent("reset-attempts"));
     setCurrentChallengeId(challengeId);
     const typingId = "typing";
     const userMsgId = crypto.randomUUID();
@@ -434,6 +451,16 @@ export default function LearningAssistant() {
     );
   };
 
+  useEffect(() => {
+    // Only show if level increased and currentLevelXp is small (just after level-up)
+    const currentLevelXp = getXpForCurrentLevel(xpPoints, userLevel);
+    if (userLevel > prevLevel && currentLevelXp < 10) {
+      setShowLevelUp(true);
+      setTimeout(() => setShowLevelUp(false), 3000);
+    }
+    setPrevLevel(userLevel);
+  }, [userLevel, prevLevel, xpPoints]);
+
   return (
     <div className="flex h-screen w-full overflow-hidden">
       {/* Sidebar with subject navigation - hidden in focus mode */}
@@ -450,6 +477,31 @@ export default function LearningAssistant() {
           focusMode ? "bg-blue-50" : ""
         }`}
       >
+        {/* Level Up Modal */}
+        {showLevelUp && (
+          <>
+            <Confetti
+              width={width}
+              height={height}
+              numberOfPieces={300}
+              recycle={false}
+            />
+            <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+              <div className="bg-white rounded-3xl shadow-2xl px-10 py-8 border-4 border-yellow-300 flex flex-col items-center animate-fadeIn">
+                <div className="text-4xl mb-2">🏆</div>
+                <div className="text-2xl font-bold text-yellow-700 mb-2">
+                  Level Up!
+                </div>
+                <div className="text-lg text-green-600 font-semibold mb-2">
+                  Welcome to Level {userLevel}!
+                </div>
+                <div className="text-gray-600">
+                  Keep up the great work and earn even more XP!
+                </div>
+              </div>
+            </div>
+          </>
+        )}
         <div className="flex justify-between items-center mb-4">
           <h1 className="text-2xl md:text-3xl font-bold text-purple-700">
             Learning Buddy
@@ -477,7 +529,12 @@ export default function LearningAssistant() {
         <div className="flex flex-col md:flex-row gap-4 h-full">
           {/* Main chat area */}
           <div className="flex-1 flex flex-col">
-            <ProgressTracker xpPoints={xpPoints} level={userLevel} />
+            <ProgressTracker
+              xpPoints={xpPoints}
+              level={userLevel}
+              subject={activeSubject}
+              userId={userId}
+            />
 
             {/* Challenge Questions */}
             {userId && (
@@ -497,7 +554,8 @@ export default function LearningAssistant() {
               subject={activeSubject}
               onSendMessage={handleSendMessage}
               userId={userId}
-              currentChallengeId={currentChallengeId} // ✅ new
+              currentChallengeId={currentChallengeId}
+              onChallengeComplete={() => setCurrentChallengeId(null)}
             />
 
             {/* Emotional check-in */}

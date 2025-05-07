@@ -128,10 +128,32 @@ Use quiz or thought-provoking formats that make them curious.
     }
   }
 
+  // Check if last_reset is today
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const { data: activeChallenge } = await supabase
+    .from("active_challenges")
+    .select("last_reset")
+    .eq("user_id", user.id)
+    .eq("subject_id", subjectId)
+    .single();
+
+  let resetToLevel1 = false;
+  if (!activeChallenge || activeChallenge.last_reset !== today) {
+    resetToLevel1 = true;
+  }
+
+  // If reset needed, force previousDifficulty to 0 and previousPromptType to null
+  let previousDifficultyToUse = previousDifficulty;
+  let previousPromptTypeToUse = previousPromptType;
+  if (resetToLevel1) {
+    previousDifficultyToUse = 0;
+    previousPromptTypeToUse = null;
+  }
+
   const variation =
     getVariationInstructions(subject) +
-    (previousPromptType
-      ? `\nAvoid repeating the same type of question as last time, which was "${previousPromptType}".`
+    (previousPromptTypeToUse
+      ? `\nAvoid repeating the same type of question as last time, which was "${previousPromptTypeToUse}".`
       : "");
 
   const systemPrompt = `
@@ -145,7 +167,7 @@ ${
     ? `- Previous Challenge: "${previousPrompt}"`
     : "- This is the student's first challenge."
 }
-${previousPromptType ? `- Previous Type: ${previousPromptType}` : ""}
+${previousPromptTypeToUse ? `- Previous Type: ${previousPromptTypeToUse}` : ""}
 
 ### Task
 Create a new challenge question that builds on the student's progress and is slightly more difficult.
@@ -188,28 +210,43 @@ Now generate the next challenge:
 
   const promptType = detectPromptType(newPrompt, subject);
 
+  // Clamp difficulty to allowed range (1–5)
+  const allowedMin = 1;
+  const allowedMax = 5;
+  const nextDifficulty = Math.max(
+    allowedMin,
+    Math.min(previousDifficultyToUse + 1, allowedMax)
+  );
+
   // 1️⃣ Insert into 'challenges' table first
   const { data: insertedChallenge, error: insertError } = await supabase
     .from("challenges")
     .insert({
-      user_id: user.id,
       subject_id: subjectId,
-      question_text: newPrompt,
-      difficulty_level: previousDifficulty + 1,
+      prompt: newPrompt,
+      difficulty: resetToLevel1 ? 1 : nextDifficulty,
       prompt_type: promptType,
+      created_at: new Date().toISOString(),
     })
     .select()
     .single();
 
   if (insertError || !insertedChallenge) {
     console.error("❌ Error inserting challenge:", insertError);
+    console.error("Full error details:", {
+      error: insertError,
+      subjectId,
+      prompt: newPrompt,
+      difficulty: resetToLevel1 ? 1 : nextDifficulty,
+      promptType,
+    });
     return NextResponse.json(
       { error: "Challenge insert failed" },
       { status: 500 }
     );
   }
 
-  // 2️⃣ Upsert into 'active_challenges'
+  // 2️⃣ Upsert into 'active_challenges', update last_reset, and store challenge_id
   const { error: upsertError } = await supabase
     .from("active_challenges")
     .upsert(
@@ -217,8 +254,11 @@ Now generate the next challenge:
         user_id: user.id,
         subject_id: subjectId,
         prompt: newPrompt,
-        difficulty: insertedChallenge.difficulty_level,
+        difficulty: resetToLevel1 ? 1 : insertedChallenge.difficulty,
         prompt_type: promptType,
+        updated_at: new Date().toISOString(),
+        last_reset: today,
+        challenge_id: insertedChallenge.id,
       },
       { onConflict: "user_id,subject_id" }
     );
@@ -233,11 +273,44 @@ Now generate the next challenge:
 
   console.log(`✅ Generated challenge for user ${user.id}:`, newPrompt);
 
+  // Check if any subject's last_reset is not today
+  const { data: allActiveChallenges } = await supabase
+    .from("active_challenges")
+    .select("subject_id, last_reset")
+    .eq("user_id", user.id);
+
+  let globalResetToLevel1 = false;
+  if (allActiveChallenges) {
+    for (const ch of allActiveChallenges) {
+      if (ch.last_reset !== today) {
+        globalResetToLevel1 = true;
+        break;
+      }
+    }
+  } else {
+    globalResetToLevel1 = true;
+  }
+
+  // If any subject needs reset, reset all subjects for this user
+  if (globalResetToLevel1) {
+    // Update all active_challenges for this user to level 1 and last_reset = today
+    await supabase
+      .from("active_challenges")
+      .update({
+        difficulty: 1,
+        last_reset: today,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", user.id);
+    previousDifficultyToUse = 0;
+    previousPromptTypeToUse = null;
+  }
+
   return NextResponse.json({
     challenge: {
       prompt: newPrompt,
-      challenge_id: insertedChallenge.id, // 🎯 Use this for logging later
-      difficulty: insertedChallenge.difficulty_level,
+      difficulty: resetToLevel1 ? 1 : insertedChallenge.difficulty,
+      challenge_id: insertedChallenge.id,
     },
   });
 }

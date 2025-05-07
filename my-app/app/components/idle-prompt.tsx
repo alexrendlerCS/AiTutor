@@ -21,6 +21,7 @@ interface Challenge {
   id: number;
   prompt: string;
   difficulty: number;
+  challenge_id?: number;
 }
 
 export function IdlePrompt({
@@ -77,6 +78,12 @@ export function IdlePrompt({
 
           if (data.challenge) {
             setChallenge(data.challenge);
+            console.log(
+              "IdlePrompt: Challenge shown",
+              data.challenge?.id,
+              data.challenge?.difficulty,
+              data.challenge?.prompt
+            );
           } else {
             console.log(
               "⚠️ No challenge found. Generating one for subject:",
@@ -91,6 +98,12 @@ export function IdlePrompt({
             if (genRes.ok) {
               const { challenge: generated } = await genRes.json();
               setChallenge(generated ?? null);
+              console.log(
+                "IdlePrompt: Generated challenge",
+                generated?.id,
+                generated?.difficulty,
+                generated?.prompt
+              );
             } else {
               console.error(
                 "❌ Failed to generate challenge:",
@@ -114,7 +127,6 @@ export function IdlePrompt({
     loadExistingChallenge();
   }, [subject]);
 
-
   useEffect(() => {
     const handleChallengeComplete = async () => {
       const latest = await fetchActiveChallenge(subject);
@@ -135,11 +147,16 @@ export function IdlePrompt({
   }, [subject]);
 
   const handleClick = async (c: Challenge) => {
-    // Optional: prevent re-clicking rapidly
     if (!c) return;
 
-    // 🔄 Send the challenge to the AI assistant for evaluation
-    onPromptClick(c.prompt, c.id);
+    console.log(
+      "IdlePrompt: Challenge clicked",
+      c.challenge_id ?? c.id,
+      c.difficulty,
+      c.prompt
+    );
+
+    onPromptClick(c.prompt, c.challenge_id ?? c.id);
   };
 
   return (
@@ -175,7 +192,7 @@ export function IdlePrompt({
           >
             {challenge.prompt}
             <span className="text-sm text-yellow-700 ml-2">
-              +{challenge.difficulty * 10} XP
+              +{Math.min(challenge.difficulty * 10, 50)} XP
             </span>
           </div>
         ) : (
